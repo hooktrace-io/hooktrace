@@ -85,6 +85,18 @@ def settings(monkeypatch, database_url):
     return Settings()
 
 
+def _clear_summary_processor_buffer():
+    """No-op until PR5 introduces tracing._summary_processor."""
+    try:
+        from webhook_inspector.observability import tracing
+
+        proc = getattr(tracing, "_summary_processor", None)
+        if proc is not None:
+            proc._buffer.clear()
+    except (ImportError, AttributeError):
+        pass
+
+
 @pytest.fixture
 async def _reset_summary_processor():
     """Clear the InMemoryRequestSpanProcessor singleton between tests. The
@@ -92,23 +104,9 @@ async def _reset_summary_processor():
     because tracing._summary_processor doesn't exist yet — defensive against
     AttributeError, treats missing attr as 'nothing to reset'.
     """
-    try:
-        from webhook_inspector.observability import tracing
-
-        proc = getattr(tracing, "_summary_processor", None)
-        if proc is not None:
-            proc._buffer.clear()
-    except (ImportError, AttributeError):
-        pass
+    _clear_summary_processor_buffer()
     yield
-    try:
-        from webhook_inspector.observability import tracing
-
-        proc = getattr(tracing, "_summary_processor", None)
-        if proc is not None:
-            proc._buffer.clear()
-    except (ImportError, AttributeError):
-        pass
+    _clear_summary_processor_buffer()
 
 
 @pytest.fixture
