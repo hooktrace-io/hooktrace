@@ -24,6 +24,8 @@ class FakeEndpointRepo(EndpointRepository):
     async def find_by_id(self, i):
         return self.ep
 
+    async def update(self, endpoint): ...
+
     async def increment_request_count(self, i): ...
     async def delete_expired(self) -> int:
         return 0

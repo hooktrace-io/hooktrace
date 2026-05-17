@@ -9,6 +9,11 @@ class EndpointRepository(ABC):
     async def save(self, endpoint: Endpoint) -> None: ...
 
     @abstractmethod
+    async def update(self, endpoint: Endpoint) -> None:
+        """UPDATE the row matching endpoint.id with the entity's current state.
+        Raises EndpointNotFoundError if the row doesn't exist."""
+
+    @abstractmethod
     async def find_by_token(self, token: str) -> Endpoint | None: ...
 
     @abstractmethod

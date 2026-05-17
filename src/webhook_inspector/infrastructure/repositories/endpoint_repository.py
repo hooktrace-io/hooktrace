@@ -26,6 +26,8 @@ class PostgresEndpointRepository(EndpointRepository):
             response_body=endpoint.response_body,
             response_headers=endpoint.response_headers,
             response_delay_ms=endpoint.response_delay_ms,
+            signature_provider=endpoint.signature_provider,
+            signature_secret_encrypted=endpoint.signature_secret_encrypted,
         )
         self._session.add(row)
         try:
@@ -34,6 +36,25 @@ class PostgresEndpointRepository(EndpointRepository):
             raise SlugAlreadyTakenError(
                 f"endpoint with token '{endpoint.token}' already exists"
             ) from e
+
+    async def update(self, endpoint: Endpoint) -> None:
+        stmt = (
+            update(EndpointTable)
+            .where(EndpointTable.id == endpoint.id)  # type: ignore[arg-type]
+            .values(
+                signature_provider=endpoint.signature_provider,
+                signature_secret_encrypted=endpoint.signature_secret_encrypted,
+                response_status_code=endpoint.response_status_code,
+                response_body=endpoint.response_body,
+                response_headers=endpoint.response_headers,
+                response_delay_ms=endpoint.response_delay_ms,
+            )
+        )
+        result = await self._session.execute(stmt)
+        if (result.rowcount or 0) == 0:  # type: ignore[attr-defined]
+            from webhook_inspector.domain.exceptions import EndpointNotFoundError
+
+            raise EndpointNotFoundError(f"endpoint id={endpoint.id} not found")
 
     async def find_by_token(self, token: str) -> Endpoint | None:
         stmt = select(EndpointTable).where(EndpointTable.token == token)  # type: ignore[arg-type]  # SQLAlchemy/mypy strict incompat
@@ -77,4 +98,6 @@ def _to_entity(row: EndpointTable) -> Endpoint:
         response_body=row.response_body,
         response_headers=row.response_headers,
         response_delay_ms=row.response_delay_ms,
+        signature_provider=row.signature_provider,
+        signature_secret_encrypted=row.signature_secret_encrypted,
     )
