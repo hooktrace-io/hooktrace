@@ -1,6 +1,10 @@
+from datetime import UTC, datetime, timedelta
+from uuid import uuid4
+
 import pytest
 
 from webhook_inspector.domain.entities.endpoint import Endpoint
+from webhook_inspector.domain.exceptions import EndpointNotFoundError
 from webhook_inspector.infrastructure.repositories.endpoint_repository import (
     PostgresEndpointRepository,
 )
@@ -28,11 +32,6 @@ async def test_update_persists_signature_config(pg_session):
 
 @pytest.mark.asyncio
 async def test_update_unknown_id_raises(pg_session):
-    from datetime import UTC, datetime, timedelta
-    from uuid import uuid4
-
-    from webhook_inspector.domain.exceptions import EndpointNotFoundError
-
     repo = PostgresEndpointRepository(pg_session)
     now = datetime.now(UTC)
     endpoint = Endpoint(

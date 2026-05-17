@@ -6,7 +6,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from webhook_inspector.domain.entities.endpoint import Endpoint
-from webhook_inspector.domain.exceptions import SlugAlreadyTakenError
+from webhook_inspector.domain.exceptions import EndpointNotFoundError, SlugAlreadyTakenError
 from webhook_inspector.domain.ports.endpoint_repository import EndpointRepository
 from webhook_inspector.infrastructure.database.models import EndpointTable
 
@@ -38,6 +38,8 @@ class PostgresEndpointRepository(EndpointRepository):
             ) from e
 
     async def update(self, endpoint: Endpoint) -> None:
+        # Persists signature config (PR1) AND response config — both are user-mutable
+        # endpoint settings, both can be touched by future combined PATCH routes (PR7).
         stmt = (
             update(EndpointTable)
             .where(EndpointTable.id == endpoint.id)  # type: ignore[arg-type]
@@ -52,8 +54,6 @@ class PostgresEndpointRepository(EndpointRepository):
         )
         result = await self._session.execute(stmt)
         if (result.rowcount or 0) == 0:  # type: ignore[attr-defined]
-            from webhook_inspector.domain.exceptions import EndpointNotFoundError
-
             raise EndpointNotFoundError(f"endpoint id={endpoint.id} not found")
 
     async def find_by_token(self, token: str) -> Endpoint | None:
