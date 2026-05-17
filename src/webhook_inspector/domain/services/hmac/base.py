@@ -1,8 +1,8 @@
 from abc import ABC, abstractmethod
-from enum import Enum
+from enum import StrEnum
 
 
-class ValidationResult(str, Enum):
+class ValidationResult(StrEnum):
     """Canonical enum for requests.signature_status. CaptureRequest must
     always write one of these values (never NULL) so aggregation queries
     GROUP BY signature_status produce a complete histogram in PR2.
