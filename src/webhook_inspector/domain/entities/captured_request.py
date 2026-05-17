@@ -2,6 +2,10 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
+# Avoid a hard import of the enum at module level — keep the domain entity
+# layer free of service-layer dependencies. The string value is stable.
+_NO_PROVIDER_VALUE = "no_provider"
+
 
 @dataclass(slots=True)
 class CapturedRequest:
@@ -29,6 +33,7 @@ class CapturedRequest:
         body: bytes,
         source_ip: str,
         inline_threshold_bytes: int,
+        signature_status: str = _NO_PROVIDER_VALUE,
     ) -> "CapturedRequest":
         if method != method.upper():
             raise ValueError("method must be uppercase")
@@ -55,6 +60,7 @@ class CapturedRequest:
             blob_key=blob_key,
             source_ip=source_ip,
             received_at=datetime.now(UTC),
+            signature_status=signature_status,
         )
 
 
