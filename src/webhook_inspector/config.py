@@ -15,6 +15,9 @@ class Settings(BaseSettings):
     s3_access_key_id: str | None = None
     s3_secret_access_key: str | None = None
     s3_region: str = "auto"
+    secrets_encryption_key: str | None = (
+        None  # base64-encoded 32 bytes; required for HMAC + Forward secrets
+    )
     endpoint_ttl_days: int = 7
     max_body_bytes: int = 10 * 1024 * 1024
     body_inline_threshold_bytes: int = 8 * 1024
