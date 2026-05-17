@@ -33,7 +33,13 @@ class SlackValidator(HmacValidator):
             return ValidationResult.INVALID
 
         actual = sig_header[len("v0=") :]
-        basestring = f"v0:{timestamp}:{body.decode('utf-8', errors='replace')}".encode()
+        try:
+            basestring = f"v0:{timestamp}:{body.decode('utf-8')}".encode()
+        except UnicodeDecodeError:
+            # Slack payloads are always UTF-8; a non-UTF-8 body can't be canonically
+            # signed, so we can't validate the signature.
+            return ValidationResult.INVALID
+
         expected = hmac.new(secret.encode(), basestring, hashlib.sha256).hexdigest()
 
         if hmac.compare_digest(expected, actual):

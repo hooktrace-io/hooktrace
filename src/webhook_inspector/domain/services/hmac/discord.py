@@ -38,8 +38,15 @@ class DiscordValidator(HmacValidator):
             return ValidationResult.MISSING
 
         try:
+            body_str = body.decode("utf-8")
+        except UnicodeDecodeError:
+            # Discord payloads must be valid UTF-8 to construct the canonical signed
+            # payload. A non-UTF-8 body cannot be verified.
+            return ValidationResult.INVALID
+
+        try:
             pk = Ed25519PublicKey.from_public_bytes(bytes.fromhex(secret))
-            signed_payload = (timestamp + body.decode("utf-8", errors="replace")).encode()
+            signed_payload = (timestamp + body_str).encode()
             pk.verify(bytes.fromhex(sig_hex), signed_payload)
         except (InvalidSignature, ValueError):
             return ValidationResult.INVALID

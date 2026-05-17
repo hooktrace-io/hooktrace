@@ -53,6 +53,22 @@ def test_stripe_tampered_body_returns_invalid():
     )
 
 
+def test_stripe_non_utf8_body_returns_invalid():
+    """A body with non-UTF-8 bytes cannot be canonically signed. The
+    validator must return INVALID (not raise UnicodeDecodeError).
+    """
+    secret = "whsec_testsecret"
+    body = b"\xff\xfe\xfd"  # invalid UTF-8
+    # The decode failure short-circuits to INVALID before HMAC compute.
+    validator = StripeValidator()
+    result = validator.validate(
+        body=body,
+        headers={"stripe-signature": "t=1700000000,v1=abc"},
+        secret=secret,
+    )
+    assert result == ValidationResult.INVALID
+
+
 def test_stripe_multiple_v1_signatures_accept_any_valid():
     # During key rotation, Stripe sends multiple v1= in the same header.
     secret_current = "whsec_current"

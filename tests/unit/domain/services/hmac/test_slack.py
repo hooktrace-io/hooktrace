@@ -47,6 +47,25 @@ def test_slack_missing_header_returns_missing():
     assert validator.validate(body=b"x", headers={}, secret="secret") == ValidationResult.MISSING
 
 
+def test_slack_non_utf8_body_returns_invalid():
+    """A body with non-UTF-8 bytes cannot be canonically signed. The
+    validator must return INVALID (not raise UnicodeDecodeError).
+    """
+    secret = "slack_signing_secret"
+    body = b"\xff\xfe\xfd"  # invalid UTF-8
+    # The decode failure short-circuits to INVALID before HMAC compute.
+    validator = SlackValidator()
+    result = validator.validate(
+        body=body,
+        headers={
+            "x-slack-signature": "v0=abc",
+            "x-slack-request-timestamp": "1700000000",
+        },
+        secret=secret,
+    )
+    assert result == ValidationResult.INVALID
+
+
 def test_slack_tampered_body_returns_invalid():
     secret = "slack_signing_secret"
     body = b"token=test&payload=%7B%7D"
