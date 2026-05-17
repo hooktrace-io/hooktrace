@@ -55,6 +55,23 @@ def test_discord_missing_header_returns_missing():
     assert validator.validate(body=b"x", headers={}, secret="a" * 64) == ValidationResult.MISSING
 
 
+def test_discord_non_utf8_body_returns_invalid():
+    """A body with non-UTF-8 bytes cannot be canonically signed. The
+    validator must return INVALID (not raise UnicodeDecodeError).
+    """
+    body = b"\xff\xfe\xfd"  # invalid UTF-8
+    validator = DiscordValidator()
+    result = validator.validate(
+        body=body,
+        headers={
+            "x-signature-ed25519": "0" * 128,
+            "x-signature-timestamp": "1700000000",
+        },
+        secret="0" * 64,
+    )
+    assert result == ValidationResult.INVALID
+
+
 def test_discord_tampered_body_returns_invalid():
     private_key, public_key_hex = _generate_keypair()
     body = b'{"type":1}'

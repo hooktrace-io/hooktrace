@@ -40,7 +40,14 @@ class StripeValidator(HmacValidator):
         if not timestamp or not signatures:
             return ValidationResult.INVALID
 
-        signed = f"{timestamp}.{body.decode('utf-8', errors='replace')}".encode()
+        try:
+            signed = f"{timestamp}.{body.decode('utf-8')}".encode()
+        except UnicodeDecodeError:
+            # Stripe payloads are always UTF-8 JSON; a non-UTF-8 body means either
+            # forged traffic or a sender bug. Either way we can't compute the
+            # canonical signed string, so the signature can't be validated.
+            return ValidationResult.INVALID
+
         expected = hmac.new(secret.encode(), signed, hashlib.sha256).hexdigest()
 
         for actual in signatures:
