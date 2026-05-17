@@ -29,6 +29,8 @@ class Endpoint:
     response_body: str = DEFAULT_RESPONSE_BODY
     response_headers: dict[str, str] = field(default_factory=dict)
     response_delay_ms: int = DEFAULT_RESPONSE_DELAY_MS
+    signature_provider: str | None = None
+    signature_secret_encrypted: bytes | None = None
 
     @classmethod
     def create(

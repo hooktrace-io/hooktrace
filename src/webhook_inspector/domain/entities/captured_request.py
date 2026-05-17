@@ -16,6 +16,7 @@ class CapturedRequest:
     blob_key: str | None
     source_ip: str
     received_at: datetime
+    signature_status: str | None = None
 
     @classmethod
     def create(
