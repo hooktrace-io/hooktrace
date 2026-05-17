@@ -7,7 +7,7 @@ from webhook_inspector.domain.services.hmac.base import HmacValidator, Validatio
 class N8nValidator(HmacValidator):
     """n8n webhook signature validator.
 
-    Reference: https://docs.n8n.io/
+    Reference: https://docs.n8n.io/integrations/builtin/core-nodes/n8n-nodes-base.webhook/#authentication
     Format: X-N8N-Signature: <sha256_hex>
     Signed payload: raw request body.
     Algorithm: HMAC-SHA256, hex-encoded.

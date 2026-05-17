@@ -23,5 +23,9 @@ _VALIDATORS: dict[str, type[HmacValidator]] = {
 
 
 def get_validator(provider: str) -> HmacValidator | None:
+    """Return a fresh HmacValidator instance for `provider`, or None if
+    the name doesn't match any registered service. None signals "not
+    configured" — not an error.
+    """
     cls = _VALIDATORS.get(provider.lower())
     return cls() if cls else None
