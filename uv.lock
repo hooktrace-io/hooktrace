@@ -2015,6 +2015,7 @@ source = { editable = "." }
 dependencies = [
     { name = "alembic" },
     { name = "boto3" },
+    { name = "cryptography" },
     { name = "fastapi" },
     { name = "google-cloud-storage" },
     { name = "gunicorn" },
@@ -2049,6 +2050,7 @@ dev = [
 requires-dist = [
     { name = "alembic", specifier = ">=1.18.4" },
     { name = "boto3", specifier = ">=1.34" },
+    { name = "cryptography", specifier = ">=42" },
     { name = "fastapi", specifier = ">=0.136.1" },
     { name = "google-cloud-storage", specifier = ">=3.10.1" },
     { name = "gunicorn", specifier = ">=26.0.0" },
