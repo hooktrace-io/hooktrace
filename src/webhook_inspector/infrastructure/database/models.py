@@ -1,7 +1,7 @@
 from datetime import datetime
 from uuid import UUID, uuid4
 
-from sqlalchemy import Column, Computed
+from sqlalchemy import Column, Computed, LargeBinary
 from sqlalchemy.dialects.postgresql import INET, JSONB, TSVECTOR
 from sqlmodel import Field, SQLModel
 
@@ -24,6 +24,12 @@ class EndpointTable(SQLModel, table=True):
     )
     response_delay_ms: int = Field(default=0, nullable=False)
 
+    # V3 — HMAC signature validation
+    signature_provider: str | None = Field(default=None)
+    signature_secret_encrypted: bytes | None = Field(
+        default=None, sa_column=Column(LargeBinary, nullable=True)
+    )
+
 
 class RequestTable(SQLModel, table=True):
     __tablename__ = "requests"
@@ -39,6 +45,9 @@ class RequestTable(SQLModel, table=True):
     blob_key: str | None = Field(default=None)
     source_ip: str = Field(sa_column=Column(INET, nullable=False))
     received_at: datetime = Field(nullable=False)
+
+    # V3 — HMAC signature validation
+    signature_status: str | None = Field(default=None)
 
     # V2.5 — generated tsvector column for full-text search. Mirrors the
     # GENERATED ALWAYS expression in migration 0003 so SQLAlchemy:
