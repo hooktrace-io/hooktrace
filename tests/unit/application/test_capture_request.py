@@ -29,6 +29,8 @@ class FakeEndpointRepo(EndpointRepository):
     async def find_by_id(self, endpoint_id):
         return next((e for e in self.saved if e.id == endpoint_id), None)
 
+    async def update(self, endpoint): ...
+
     async def increment_request_count(self, endpoint_id):
         self.increments.append(endpoint_id)
 

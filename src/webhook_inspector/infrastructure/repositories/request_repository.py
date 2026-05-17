@@ -116,4 +116,5 @@ def _to_entity(row: RequestTable) -> CapturedRequest:
         blob_key=row.blob_key,
         source_ip=row.source_ip,
         received_at=row.received_at,
+        signature_status=row.signature_status,
     )
