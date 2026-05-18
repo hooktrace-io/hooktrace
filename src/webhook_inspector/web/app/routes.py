@@ -330,6 +330,7 @@ async def list_requests_fragment(
     rendered = "".join(
         fragment_template.render(
             req={
+                "id": str(r.id),
                 "method": r.method,
                 "path": r.path,
                 "body_size": r.body_size,
@@ -556,6 +557,7 @@ async def viewer(
                 "hook_url": f"{hook_base_url(request)}/h/{token}",
                 "initial_requests": [
                     {
+                        "id": str(r.id),
                         "method": r.method,
                         "path": r.path,
                         "body_size": r.body_size,
