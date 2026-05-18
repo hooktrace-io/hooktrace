@@ -53,11 +53,11 @@ async def engine(database_url: str):
     from alembic import command
     from alembic.config import Config
 
-    sync_url = database_url.replace("+psycopg_async", "+psycopg").replace(
-        "postgresql+psycopg://", "postgresql://"
-    )
+    # alembic's env.py uses async_engine_from_config so the URL must keep the
+    # +psycopg driver tag. We pass database_url as-is (testcontainers already
+    # gives us postgresql+psycopg://...).
     cfg = Config("alembic.ini")
-    cfg.set_main_option("sqlalchemy.url", sync_url)
+    cfg.set_main_option("sqlalchemy.url", database_url)
     await asyncio.to_thread(command.upgrade, cfg, "head")
     yield eng
     await eng.dispose()

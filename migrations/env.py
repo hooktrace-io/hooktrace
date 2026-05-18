@@ -14,8 +14,13 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-settings = Settings()
-config.set_main_option("sqlalchemy.url", settings.database_url)
+# Only fall back to Settings.database_url when no URL was injected at the
+# call site (e.g. tests/conftest.py sets the testcontainer URL via
+# `cfg.set_main_option(...)` before invoking `command.upgrade`).
+_injected_url = config.get_main_option("sqlalchemy.url")
+if not _injected_url or _injected_url.startswith("driver://"):
+    settings = Settings()
+    config.set_main_option("sqlalchemy.url", settings.database_url)
 
 target_metadata = SQLModel.metadata
 

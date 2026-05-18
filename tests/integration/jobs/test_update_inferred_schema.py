@@ -73,7 +73,7 @@ async def test_first_capture_builds_schema_and_sets_drift(
 
     # 1. Create endpoint
     resp = await app_client.post("/api/endpoints", json={})
-    assert resp.status_code == 200
+    assert resp.status_code == 201
     token = resp.json()["token"]
 
     # 2. Send a Stripe webhook (stripe-signature header triggers integration detection)
@@ -228,13 +228,23 @@ async def test_concurrent_captures_same_event_class_serialize_via_advisory_lock(
 
     # Verify final cumulative reflects BOTH captures: sample_count == 2 and
     # the schema contains properties from both bodies (amount AND currency).
+    # Scope by endpoint_id — the testcontainers Postgres survives across tests
+    # in the same session, so prior Stripe captures linger in inferred_schemas.
     async with session_factory() as session:
+        endpoint_row = (
+            await session.execute(
+                text("SELECT id FROM endpoints WHERE token = :t"),
+                {"t": token},
+            )
+        ).one()
         row = (
             await session.execute(
                 text(
                     "SELECT sample_count, schema_json FROM inferred_schemas "
-                    "WHERE integration = 'stripe' AND event_type = 'charge.succeeded'"
-                )
+                    "WHERE endpoint_id = :eid "
+                    "AND integration = 'stripe' AND event_type = 'charge.succeeded'"
+                ),
+                {"eid": endpoint_row.id},
             )
         ).one()
     assert row.sample_count == 2
