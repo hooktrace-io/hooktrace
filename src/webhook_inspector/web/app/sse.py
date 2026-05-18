@@ -63,6 +63,7 @@ async def stream_for_token(
                 continue
             html = fragment.render(
                 req={
+                    "id": str(req.id),
                     "method": req.method,
                     "path": req.path,
                     "body_size": req.body_size,
