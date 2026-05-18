@@ -118,7 +118,7 @@ def _advisory_lock_key(endpoint_id: UUID, integration: str, event_type: str | No
     return raw - (1 << 64) if raw >= (1 << 63) else raw
 
 
-def _merge_schemas(old: dict, new: dict) -> dict:
+def _merge_schemas(old: dict[str, object], new: dict[str, object]) -> dict[str, object]:
     """Merge two JSON Schemas into a unified one via genson. If either is
     empty, return the other (no-op).
     """
@@ -131,4 +131,5 @@ def _merge_schemas(old: dict, new: dict) -> dict:
     builder = SchemaBuilder()
     builder.add_schema(old)
     builder.add_schema(new)
-    return builder.to_schema()
+    result: dict[str, object] = builder.to_schema()
+    return result

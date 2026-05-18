@@ -9,7 +9,7 @@ no-module-level-side-effects rule established for the web/ingestor apps.
 
 import logging
 import os
-from typing import ClassVar
+from typing import ClassVar, cast
 from uuid import UUID
 
 from arq.connections import RedisSettings
@@ -38,7 +38,7 @@ logger = logging.getLogger(__name__)
 _REDIS_DSN = os.environ.get("REDIS_URL", "redis://localhost:6379")
 
 
-async def startup(ctx: dict) -> None:
+async def startup(ctx: dict[str, object]) -> None:
     """arq on_startup hook — equivalent of FastAPI lifespan.
     Wires logging + tracing + metrics so the worker is observable the same
     way as web/ingestor (structlog JSON output to fly logs).
@@ -76,7 +76,7 @@ async def startup(ctx: dict) -> None:
     ctx["_settings"] = settings
 
 
-async def shutdown(_ctx: dict) -> None:
+async def shutdown(_ctx: dict[str, object]) -> None:
     """arq on_shutdown hook — flush any pending OTEL metrics before exit.
     CLAUDE.md: short-lived jobs (and any process that may be killed
     by Fly machine rotation) MUST force_flush_metrics() or the last interval's
@@ -86,13 +86,18 @@ async def shutdown(_ctx: dict) -> None:
     logger.info("worker_shutdown")
 
 
-async def update_inferred_schema(ctx: dict, request_id_str: str) -> None:
+async def update_inferred_schema(ctx: dict[str, object], request_id_str: str) -> None:
     """arq job wrapper for UpdateInferredSchema use case.
     Called by arq with ctx populated by on_startup. Builds a fresh DB session
     (and therefore a fresh transaction) per job invocation — the advisory lock
     is scoped to the transaction lifetime.
     """
-    session_factory: async_sessionmaker[AsyncSession] = ctx["_session_factory"]
+    from webhook_inspector.domain.ports.blob_storage import BlobStorage
+    from webhook_inspector.domain.ports.metrics_collector import MetricsCollector
+
+    session_factory = cast(async_sessionmaker[AsyncSession], ctx["_session_factory"])
+    blob_storage = cast(BlobStorage, ctx["_blob_storage"])
+    metrics_collector = cast(MetricsCollector, ctx["_metrics_collector"])
 
     from webhook_inspector.infrastructure.repositories.request_repository import (
         PostgresRequestRepository,
@@ -106,8 +111,8 @@ async def update_inferred_schema(ctx: dict, request_id_str: str) -> None:
             use_case = UpdateInferredSchema(
                 request_repo=PostgresRequestRepository(session),
                 schema_repo=PostgresSchemaRepository(session),
-                blob_storage=ctx["_blob_storage"],
-                metrics=ctx["_metrics_collector"],
+                blob_storage=blob_storage,
+                metrics=metrics_collector,
             )
             await use_case.execute(UUID(request_id_str))
             await session.commit()
@@ -129,7 +134,7 @@ class WorkerSettings:
     # dependency, so DATABASE_URL is not required to import this module).
     redis_settings = RedisSettings.from_dsn(_REDIS_DSN)
 
-    functions: ClassVar[list] = [update_inferred_schema]
+    functions: ClassVar[list[object]] = [update_inferred_schema]
 
     # Retry policy. NOT 1: a non-zero margin lets arq pick up a job whose
     # function crashed before its own retry logic ran (e.g. OOM, SIGTERM
