@@ -111,13 +111,8 @@ async def get_update_endpoint_config(
     session: AsyncSession = Depends(get_session),  # noqa: B008
     settings: Settings = Depends(get_settings),  # noqa: B008
 ) -> UpdateEndpointConfig:
-    key = (
-        base64.b64decode(settings.secrets_encryption_key)
-        if settings.secrets_encryption_key
-        else b""
-    )
-    if len(key) != 32:
-        raise RuntimeError("SECRETS_ENCRYPTION_KEY must be set (32 bytes base64)")
+    # Key was validated at startup by lifespan; decode and pass through.
+    key = base64.b64decode(settings.secrets_encryption_key)  # type: ignore[arg-type]
     return UpdateEndpointConfig(
         endpoint_repo=PostgresEndpointRepository(session),
         secrets_key=key,
