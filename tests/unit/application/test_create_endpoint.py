@@ -2,39 +2,13 @@ from uuid import UUID
 
 import pytest
 
-from tests.fakes.metrics_collector import FakeMetricsCollector
+from tests.fakes import FakeEndpointRepo, FakeMetricsCollector
 from webhook_inspector.application.use_cases.create_endpoint import CreateEndpoint
-from webhook_inspector.domain.entities.endpoint import Endpoint
 from webhook_inspector.domain.exceptions import (
     InvalidSlugError,
     ReservedSlugError,
     SlugAlreadyTakenError,
 )
-from webhook_inspector.domain.ports.endpoint_repository import EndpointRepository
-
-
-class FakeEndpointRepo(EndpointRepository):
-    def __init__(self):
-        self.saved: list[Endpoint] = []
-
-    async def save(self, endpoint):
-        self.saved.append(endpoint)
-
-    async def find_by_token(self, token):
-        return next((e for e in self.saved if e.token == token), None)
-
-    async def find_by_id(self, endpoint_id):
-        return next((e for e in self.saved if e.id == endpoint_id), None)
-
-    async def update(self, endpoint): ...
-
-    async def increment_request_count(self, endpoint_id): ...
-
-    async def delete_expired(self) -> int:
-        return 0
-
-    async def count_active(self) -> int:
-        return len([e for e in self.saved if not e.is_expired()])
 
 
 async def test_creates_and_persists_endpoint():
