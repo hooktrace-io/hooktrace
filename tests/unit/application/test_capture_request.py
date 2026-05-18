@@ -265,3 +265,129 @@ async def test_capture_request_records_metric():
     assert call.body_offloaded is False
     assert call.body_size == 2
     assert call.duration_seconds >= 0
+
+
+# ---------------------------------------------------------------------------
+# Integration detection
+# ---------------------------------------------------------------------------
+
+
+async def test_capture_detects_stripe_integration():
+    """Stripe-signature header → detected_integration='stripe'."""
+    ep = _make_endpoint()
+    erepo = FakeEndpointRepo(ep)
+    rrepo = FakeRequestRepo()
+    blob = FakeBlobStorage()
+    uc = CaptureRequest(
+        erepo,
+        rrepo,
+        blob,
+        inline_threshold=8192,
+        metrics=FakeMetricsCollector(),
+        secrets_key=_NO_KEY,
+    )
+
+    captured, _ = await uc.execute(
+        token="abc",
+        method="POST",
+        path="/h/abc",
+        query_string=None,
+        headers={"stripe-signature": "t=1,v1=abc"},
+        body=b'{"type": "payment_intent.created", "id": "evt_123"}',
+        source_ip="1.2.3.4",
+    )
+
+    assert captured.detected_integration == "stripe"
+    assert captured.detected_event_type == "payment_intent.created"
+
+
+async def test_capture_stripe_body_without_type_field():
+    """Stripe body missing 'type' → event_type is None."""
+    ep = _make_endpoint()
+    erepo = FakeEndpointRepo(ep)
+    rrepo = FakeRequestRepo()
+    blob = FakeBlobStorage()
+    uc = CaptureRequest(
+        erepo,
+        rrepo,
+        blob,
+        inline_threshold=8192,
+        metrics=FakeMetricsCollector(),
+        secrets_key=_NO_KEY,
+    )
+
+    captured, _ = await uc.execute(
+        token="abc",
+        method="POST",
+        path="/h/abc",
+        query_string=None,
+        headers={"stripe-signature": "t=1,v1=abc"},
+        body=b'{"id": "evt_123"}',
+        source_ip="1.2.3.4",
+    )
+
+    assert captured.detected_integration == "stripe"
+    assert captured.detected_event_type is None
+
+
+async def test_capture_no_integration_headers_returns_none():
+    """Plain POST with no known headers → both detection fields are None."""
+    ep = _make_endpoint()
+    erepo = FakeEndpointRepo(ep)
+    rrepo = FakeRequestRepo()
+    blob = FakeBlobStorage()
+    uc = CaptureRequest(
+        erepo,
+        rrepo,
+        blob,
+        inline_threshold=8192,
+        metrics=FakeMetricsCollector(),
+        secrets_key=_NO_KEY,
+    )
+
+    captured, _ = await uc.execute(
+        token="abc",
+        method="POST",
+        path="/h/abc",
+        query_string=None,
+        headers={"content-type": "application/json"},
+        body=b'{"foo": "bar"}',
+        source_ip="1.2.3.4",
+    )
+
+    assert captured.detected_integration is None
+    assert captured.detected_event_type is None
+
+
+async def test_capture_blob_fallback_preserves_integration():
+    """When R2 upload fails, the reconstructed CapturedRequest keeps integration fields."""
+    ep = _make_endpoint()
+    erepo = FakeEndpointRepo(ep)
+    rrepo = FakeRequestRepo()
+    blob = FakeBlobStorage(fail=True)  # R2 down
+    uc = CaptureRequest(
+        erepo,
+        rrepo,
+        blob,
+        inline_threshold=8192,
+        metrics=FakeMetricsCollector(),
+        secrets_key=_NO_KEY,
+    )
+
+    big = b'{"type": "charge.failed"}' * 500  # > 8192 bytes → triggers blob path
+
+    captured, _ = await uc.execute(
+        token="abc",
+        method="POST",
+        path="/h/abc",
+        query_string=None,
+        headers={"stripe-signature": "t=1,v1=abc"},
+        body=big,
+        source_ip="1.2.3.4",
+    )
+
+    # Blob failed, so blob_key is None. But integration must still be set.
+    assert captured.blob_key is None
+    assert captured.detected_integration == "stripe"
+    # Body > 8 KB → extract_stripe_event_type cap → None
+    assert captured.detected_event_type is None
