@@ -5,6 +5,7 @@ from uuid import UUID, uuid4
 
 import pytest
 
+from tests.fakes import FakeBlobStorage, FakeEndpointRepo
 from webhook_inspector.application.use_cases.export_requests import (
     ExportRequests,
     ExportTooLargeError,
@@ -12,7 +13,6 @@ from webhook_inspector.application.use_cases.export_requests import (
 from webhook_inspector.domain.entities.captured_request import CapturedRequest
 from webhook_inspector.domain.entities.endpoint import Endpoint
 from webhook_inspector.domain.exceptions import EndpointNotFoundError
-from webhook_inspector.domain.ports.blob_storage import BlobStorage
 
 
 def _make_request(*, body_preview: str | None, blob_key: str | None) -> CapturedRequest:
@@ -31,17 +31,6 @@ def _make_request(*, body_preview: str | None, blob_key: str | None) -> Captured
     )
 
 
-class FakeBlobStorage(BlobStorage):
-    def __init__(self, blobs: dict[str, bytes]) -> None:
-        self._blobs = blobs
-
-    async def put(self, key: str, data: bytes) -> None:
-        self._blobs[key] = data
-
-    async def get(self, key: str) -> bytes | None:
-        return self._blobs.get(key)
-
-
 class FakeReqRepo:
     def __init__(self, rows: list[CapturedRequest], total: int) -> None:
         self._rows = rows
@@ -56,14 +45,6 @@ class FakeReqRepo:
                 yield r
 
         return _gen()
-
-
-class FakeEndpointRepo:
-    def __init__(self, endpoint: Endpoint | None) -> None:
-        self._endpoint = endpoint
-
-    async def find_by_token(self, token):
-        return self._endpoint
 
 
 async def test_export_raises_when_endpoint_missing():

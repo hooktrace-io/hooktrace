@@ -1,83 +1,14 @@
 from datetime import UTC, datetime, timedelta
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 import pytest
 
-from tests.fakes.metrics_collector import FakeMetricsCollector
+from tests.fakes import FakeBlobStorage, FakeEndpointRepo, FakeMetricsCollector, FakeRequestRepo
 from webhook_inspector.application.use_cases.capture_request import (
     CaptureRequest,
     EndpointNotFoundError,
 )
-from webhook_inspector.domain.entities.captured_request import CapturedRequest
 from webhook_inspector.domain.entities.endpoint import Endpoint
-from webhook_inspector.domain.ports.blob_storage import BlobStorage
-from webhook_inspector.domain.ports.endpoint_repository import EndpointRepository
-from webhook_inspector.domain.ports.request_repository import RequestRepository
-
-
-class FakeEndpointRepo(EndpointRepository):
-    def __init__(self, seed: Endpoint | None = None):
-        self.saved = [seed] if seed else []
-        self.increments: list[UUID] = []
-
-    async def save(self, endpoint):
-        self.saved.append(endpoint)
-
-    async def find_by_token(self, token):
-        return next((e for e in self.saved if e.token == token), None)
-
-    async def find_by_id(self, endpoint_id):
-        return next((e for e in self.saved if e.id == endpoint_id), None)
-
-    async def update(self, endpoint): ...
-
-    async def increment_request_count(self, endpoint_id):
-        self.increments.append(endpoint_id)
-
-    async def delete_expired(self) -> int:
-        return 0
-
-    async def count_active(self) -> int:
-        return len([e for e in self.saved if e is not None and not e.is_expired()])
-
-
-class FakeRequestRepo(RequestRepository):
-    def __init__(self):
-        self.saved: list[CapturedRequest] = []
-
-    async def save(self, request):
-        self.saved.append(request)
-
-    async def find_by_id(self, request_id):
-        return next((r for r in self.saved if r.id == request_id), None)
-
-    async def list_by_endpoint(self, endpoint_id, limit=50, before_id=None, q=None):
-        return []
-
-    async def stream_for_export(self, endpoint_id, max_count):
-        for r in [x for x in self.saved if x.endpoint_id == endpoint_id][:max_count]:
-            yield r
-
-    async def count_by_endpoint(self, endpoint_id):
-        return len([r for r in self.saved if r.endpoint_id == endpoint_id])
-
-    async def aggregate_by_integration(self, endpoint_id):
-        return []
-
-
-class FakeBlobStorage(BlobStorage):
-    def __init__(self, fail: bool = False):
-        self.puts: dict[str, bytes] = {}
-        self.fail = fail
-
-    async def put(self, key, data):
-        if self.fail:
-            raise RuntimeError("storage down")
-        self.puts[key] = data
-
-    async def get(self, key):
-        return self.puts.get(key)
-
 
 # Dummy 32-byte key; these tests don't configure a signature provider so the
 # key is never actually used for encryption/decryption.

@@ -3,136 +3,13 @@
 Uses in-memory fakes — Docker / testcontainers NOT required.
 """
 
-from datetime import UTC, datetime, timedelta
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 import pytest
 
+from tests.fakes import FakeEndpointRepo, FakeRequestRepo
 from webhook_inspector.application.use_cases.list_integrations import ListIntegrations
-from webhook_inspector.domain.entities.endpoint import Endpoint
-from webhook_inspector.domain.entities.integration_aggregate import IntegrationAggregate
 from webhook_inspector.domain.exceptions import EndpointNotFoundError
-from webhook_inspector.domain.ports.endpoint_repository import EndpointRepository
-from webhook_inspector.domain.ports.request_repository import RequestRepository
-
-# ---------------------------------------------------------------------------
-# Fakes
-# ---------------------------------------------------------------------------
-
-
-class FakeEndpointRepo(EndpointRepository):
-    def __init__(self):
-        self._endpoints: list[Endpoint] = []
-
-    def add(self, *, token: str, id: str | UUID) -> Endpoint:
-        ep_id = UUID(str(id)) if isinstance(id, str) else id
-        ep = Endpoint(
-            id=ep_id,
-            token=token,
-            created_at=datetime.now(UTC),
-            expires_at=datetime.now(UTC) + timedelta(days=7),
-            request_count=0,
-        )
-        self._endpoints.append(ep)
-        return ep
-
-    async def save(self, endpoint): ...
-
-    async def find_by_token(self, token):
-        return next((e for e in self._endpoints if e.token == token), None)
-
-    async def find_by_id(self, endpoint_id):
-        return next((e for e in self._endpoints if e.id == endpoint_id), None)
-
-    async def update(self, endpoint): ...
-
-    async def increment_request_count(self, endpoint_id): ...
-
-    async def delete_expired(self) -> int:
-        return 0
-
-    async def count_active(self) -> int:
-        return 0
-
-
-class FakeRequestRepo(RequestRepository):
-    """In-memory request repo with full aggregate_by_integration logic."""
-
-    def __init__(self):
-        self._items: list[dict] = []
-
-    def add(
-        self,
-        *,
-        endpoint_id: str | UUID,
-        integration: str,
-        event: str | None = None,
-        signature_status: str = "no_provider",
-    ) -> None:
-        self._items.append(
-            {
-                "endpoint_id": UUID(str(endpoint_id))
-                if isinstance(endpoint_id, str)
-                else endpoint_id,
-                "integration": integration,
-                "event": event,
-                "signature_status": signature_status,
-            }
-        )
-
-    async def save(self, request): ...
-
-    async def find_by_id(self, request_id):
-        return None
-
-    async def list_by_endpoint(self, endpoint_id, limit=50, before_id=None, q=None):
-        return []
-
-    async def stream_for_export(self, endpoint_id, max_count):
-        return
-        yield  # make it a generator
-
-    async def count_by_endpoint(self, endpoint_id):
-        return 0
-
-    async def aggregate_by_integration(self, endpoint_id: UUID) -> list[IntegrationAggregate]:
-        """In-memory aggregation matching the PostgreSQL 3-CTE behaviour."""
-        relevant = [
-            item
-            for item in self._items
-            if item["endpoint_id"] == endpoint_id and item["integration"] is not None
-        ]
-
-        # Group by integration
-        integrations: dict[str, dict] = {}
-        for item in relevant:
-            key = item["integration"]
-            if key not in integrations:
-                integrations[key] = {"total": 0, "event_types": {}, "signature_status_counts": {}}
-            integrations[key]["total"] += 1
-            # event_types
-            if item["event"] is not None:
-                et = item["event"]
-                integrations[key]["event_types"][et] = (
-                    integrations[key]["event_types"].get(et, 0) + 1
-                )
-            # signature_status_counts
-            ss = item["signature_status"]
-            integrations[key]["signature_status_counts"][ss] = (
-                integrations[key]["signature_status_counts"].get(ss, 0) + 1
-            )
-
-        # Sort by total DESC (matches ORDER BY pi.total DESC in SQL)
-        return [
-            IntegrationAggregate(
-                integration=k,
-                total=v["total"],
-                event_types=v["event_types"],
-                signature_status_counts=v["signature_status_counts"],
-            )
-            for k, v in sorted(integrations.items(), key=lambda x: -x[1]["total"])
-        ]
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
