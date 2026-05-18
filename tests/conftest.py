@@ -122,6 +122,10 @@ async def app_client(monkeypatch, database_url, engine):
         deps.get_metrics,
     ):
         fn.cache_clear()
+    # Reset the ForwardQueue singleton between tests so a previous run's
+    # ArqForwardQueue (if any) doesn't leak — the lifespan will rebuild it
+    # when settings.redis_url is set.
+    deps._forward_queue_singleton = None
     async with LifespanManager(web_app):
         async with httpx.AsyncClient(
             transport=ASGITransport(app=web_app), base_url="http://test"
