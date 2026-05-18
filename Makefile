@@ -1,4 +1,4 @@
-.PHONY: install lint type test test-unit test-int test-e2e up down migrate clean help
+.PHONY: install lint type test test-unit test-int test-e2e ci up down migrate clean help
 
 install: ## Install dependencies via uv
 	uv sync
@@ -28,6 +28,20 @@ test-e2e: ## Run E2E tests
 
 test: ## Run full pytest suite
 	uv run pytest tests -v
+
+ci: ## Reproduce the GitHub Actions CI invocation locally (lint + type + unit-with-coverage + integration)
+	uv run ruff check src tests
+	uv run ruff format --check src tests
+	uv run mypy src
+	uv run pytest tests/unit --cov=src/webhook_inspector/domain --cov=src/webhook_inspector/application --cov-fail-under=95 -q
+	@docker info > /dev/null 2>&1 || { echo "❌ Docker not running — integration tests require testcontainers Postgres. Skip with: make ci-no-int"; exit 1; }
+	uv run pytest tests/integration -q
+
+ci-no-int: ## Same as `ci` but skips integration tests (use when Docker is unavailable)
+	uv run ruff check src tests
+	uv run ruff format --check src tests
+	uv run mypy src
+	uv run pytest tests/unit --cov=src/webhook_inspector/domain --cov=src/webhook_inspector/application --cov-fail-under=95 -q
 
 up: ## Start docker-compose stack
 	docker compose up -d --build
