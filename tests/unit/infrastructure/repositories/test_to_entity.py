@@ -106,3 +106,43 @@ def test_to_entity_schema_drift_defaults_none() -> None:
     )
     entity = _to_entity(row)
     assert entity.schema_drift is None
+
+
+def test_to_entity_propagates_trace_summary() -> None:
+    summary = [{"name": "capture", "duration_ms": 12, "attributes": {}}]
+    row = RequestTable(
+        id=uuid.uuid4(),
+        endpoint_id=uuid.uuid4(),
+        method="POST",
+        path="/",
+        query_string=None,
+        headers={},
+        body_preview=None,
+        body_size=2,
+        blob_key=None,
+        source_ip="127.0.0.1",
+        received_at=datetime.now(UTC),
+        signature_status="no_provider",
+        trace_summary=summary,
+    )
+    entity = _to_entity(row)
+    assert entity.trace_summary == summary
+
+
+def test_to_entity_trace_summary_defaults_none() -> None:
+    row = RequestTable(
+        id=uuid.uuid4(),
+        endpoint_id=uuid.uuid4(),
+        method="POST",
+        path="/",
+        query_string=None,
+        headers={},
+        body_preview=None,
+        body_size=2,
+        blob_key=None,
+        source_ip="127.0.0.1",
+        received_at=datetime.now(UTC),
+        signature_status="no_provider",
+    )
+    entity = _to_entity(row)
+    assert entity.trace_summary is None

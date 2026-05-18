@@ -35,6 +35,7 @@ class PostgresRequestRepository(RequestRepository):
             detected_integration=request.detected_integration,
             detected_event_type=request.detected_event_type,
             schema_drift=request.schema_drift,
+            trace_summary=request.trace_summary,
         )
         self._session.add(row)
         await self._session.flush()
@@ -119,6 +120,14 @@ class PostgresRequestRepository(RequestRepository):
         )
         await self._session.execute(stmt)
 
+    async def update_trace_summary(self, request_id: UUID, summary: list[dict[str, Any]]) -> None:
+        stmt = (
+            update(RequestTable)
+            .where(RequestTable.id == request_id)  # type: ignore[arg-type]  # SQLAlchemy/mypy strict incompat
+            .values(trace_summary=summary)
+        )
+        await self._session.execute(stmt)
+
     async def aggregate_by_integration(self, endpoint_id: UUID) -> list[IntegrationAggregate]:
         stmt = text("""
             WITH per_integration AS (
@@ -192,4 +201,5 @@ def _to_entity(row: RequestTable) -> CapturedRequest:
         detected_integration=row.detected_integration,
         detected_event_type=row.detected_event_type,
         schema_drift=row.schema_drift,
+        trace_summary=row.trace_summary,
     )

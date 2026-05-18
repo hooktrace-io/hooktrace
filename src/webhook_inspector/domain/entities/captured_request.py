@@ -25,6 +25,7 @@ class CapturedRequest:
     detected_integration: str | None = None
     detected_event_type: str | None = None
     schema_drift: dict[str, Any] | None = None
+    trace_summary: list[dict[str, Any]] | None = None
 
     @classmethod
     def create(

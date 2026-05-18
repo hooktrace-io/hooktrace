@@ -59,6 +59,12 @@ class RequestTable(SQLModel, table=True):
         default=None, sa_column=Column(JSONB, nullable=True)
     )
 
+    # V3 — OTEL trace timeline (PR5)
+    trace_summary: list[dict[str, Any]] | None = Field(
+        default=None,
+        sa_column=Column(JSONB, nullable=True),
+    )
+
     # V2.5 — generated tsvector column for full-text search. Mirrors the
     # GENERATED ALWAYS expression in migration 0003 so SQLAlchemy:
     #   - never tries to INSERT/UPDATE this column (Computed handles it),
