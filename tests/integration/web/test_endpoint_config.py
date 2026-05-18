@@ -33,10 +33,6 @@ async def test_patch_config_sets_signature_provider(app_client, ingestor_client)
 
     resp = await app_client.get(f"/api/endpoints/{token}/requests")
     items = resp.json()["items"]
-    # signature_status propagation through RequestItem schema is PR1.5's job.
-    # Skip the field-presence assertion if it's not yet in the JSON response.
-    if "signature_status" not in items[0]:
-        pytest.skip("signature_status propagation through RequestItem deferred to PR1.5")
     assert items[0]["signature_status"] == "valid"
 
 
