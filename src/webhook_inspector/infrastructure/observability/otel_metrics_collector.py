@@ -47,6 +47,18 @@ class OtelMetricsCollector(MetricsCollector):
             "webhook_inspector.schema.enqueue_failed",
             description="Schema inference enqueue failures (Redis down).",
         )
+        self._replay_attempt = meter.create_counter(
+            "webhook_inspector.replay.attempt_total",
+            description="Replay attempt outcomes, labelled by status.",
+        )
+        self._ssrf_block = meter.create_counter(
+            "webhook_inspector.ssrf.block_total",
+            description="SSRF guard rejections, labelled by reason.",
+        )
+        self._ssrf_dns_validation = meter.create_counter(
+            "webhook_inspector.ssrf.dns_validation_total",
+            description="SSRF DNS validation outcomes, labelled by result.",
+        )
 
     def endpoint_created(self) -> None:
         self._endpoints_created.add(1)
@@ -74,3 +86,12 @@ class OtelMetricsCollector(MetricsCollector):
 
     def schema_enqueue_failed(self) -> None:
         self._schema_enqueue_failed.add(1)
+
+    def replay_attempt(self, *, status: str) -> None:
+        self._replay_attempt.add(1, {"status": status})
+
+    def ssrf_block(self, *, reason: str) -> None:
+        self._ssrf_block.add(1, {"reason": reason})
+
+    def ssrf_dns_validation(self, *, result: str) -> None:
+        self._ssrf_dns_validation.add(1, {"result": result})
