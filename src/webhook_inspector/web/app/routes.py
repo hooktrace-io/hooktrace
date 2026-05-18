@@ -181,6 +181,8 @@ class RequestItem(BaseModel):
         ]
         | None
     ) = None
+    detected_integration: str | None = None
+    detected_event_type: str | None = None
 
 
 class RequestList(BaseModel):
@@ -228,6 +230,8 @@ async def list_requests(
                 body_size=r.body_size,
                 received_at=r.received_at.isoformat(),
                 signature_status=r.signature_status,
+                detected_integration=r.detected_integration,
+                detected_event_type=r.detected_event_type,
             )
             for r in items
         ],
@@ -266,6 +270,8 @@ async def list_requests_fragment(
                 "headers": r.headers,
                 "body_preview": r.body_preview,
                 "signature_status": r.signature_status,
+                "detected_integration": r.detected_integration,
+                "detected_event_type": r.detected_event_type,
             },
             hook_url=hook_url,
         )
@@ -367,6 +373,8 @@ async def viewer(
                         "headers": r.headers,
                         "body_preview": r.body_preview,
                         "signature_status": r.signature_status,
+                        "detected_integration": r.detected_integration,
+                        "detected_event_type": r.detected_event_type,
                     }
                     for r in initial
                 ],

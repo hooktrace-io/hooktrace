@@ -169,3 +169,143 @@ def test_fragment_no_undefined_error_for_none():
     # Should complete without exception
     html = _render_fragment(None)
     assert "<li" in html
+
+
+# ---------------------------------------------------------------------------
+# Integration detection field propagation
+# ---------------------------------------------------------------------------
+
+
+def _make_request_with_integration(
+    detected_integration: str | None = "stripe",
+    detected_event_type: str | None = "payment_intent.created",
+) -> CapturedRequest:
+    return CapturedRequest(
+        id=uuid4(),
+        endpoint_id=uuid4(),
+        method="POST",
+        path="/h/abc",
+        query_string=None,
+        headers={"content-type": "application/json"},
+        body_preview='{"type":"payment_intent.created"}',
+        body_size=33,
+        blob_key=None,
+        source_ip="127.0.0.1",
+        received_at=datetime.now(UTC),
+        signature_status="no_provider",
+        detected_integration=detected_integration,
+        detected_event_type=detected_event_type,
+    )
+
+
+def test_request_item_includes_detected_integration():
+    """RequestItem schema must serialise detected_integration."""
+    r = _make_request_with_integration()
+    item = RequestItem(
+        id=r.id,
+        method=r.method,
+        path=r.path,
+        headers=r.headers,
+        body_preview=r.body_preview,
+        body_size=r.body_size,
+        received_at=r.received_at.isoformat(),
+        signature_status=r.signature_status,
+        detected_integration=r.detected_integration,
+        detected_event_type=r.detected_event_type,
+    )
+    payload = item.model_dump()
+    assert payload["detected_integration"] == "stripe"
+    assert payload["detected_event_type"] == "payment_intent.created"
+
+
+def test_request_item_detected_integration_none():
+    """detected_integration is None for unknown senders."""
+    r = _make_request_with_integration(detected_integration=None, detected_event_type=None)
+    item = RequestItem(
+        id=r.id,
+        method=r.method,
+        path=r.path,
+        headers=r.headers,
+        body_preview=r.body_preview,
+        body_size=r.body_size,
+        received_at=r.received_at.isoformat(),
+        signature_status=r.signature_status,
+        detected_integration=None,
+        detected_event_type=None,
+    )
+    payload = item.model_dump()
+    assert payload["detected_integration"] is None
+    assert payload["detected_event_type"] is None
+
+
+def _req_dict_with_integration(
+    detected_integration: str | None = "stripe",
+    detected_event_type: str | None = "payment_intent.created",
+) -> dict:
+    r = _make_request_with_integration(detected_integration, detected_event_type)
+    return {
+        "method": r.method,
+        "path": r.path,
+        "body_size": r.body_size,
+        "received_at": r.received_at.isoformat(),
+        "headers": r.headers,
+        "body_preview": r.body_preview,
+        "signature_status": r.signature_status,
+        "detected_integration": r.detected_integration,
+        "detected_event_type": r.detected_event_type,
+    }
+
+
+def test_fragment_dict_includes_integration_fields():
+    """Dict passed to request_fragment.html must carry both integration fields."""
+    d = _req_dict_with_integration()
+    assert d["detected_integration"] == "stripe"
+    assert d["detected_event_type"] == "payment_intent.created"
+
+
+def test_fragment_renders_integration_badge_for_stripe():
+    """Stripe integration renders violet badge with event type."""
+    env = Environment(
+        loader=FileSystemLoader(str(_TEMPLATES_DIR)),
+        autoescape=select_autoescape(),
+    )
+    template = env.get_template("request_fragment.html")
+    html = template.render(
+        req=_req_dict_with_integration("stripe", "payment_intent.created"),
+        hook_url="http://hook.test",
+    )
+    assert "stripe" in html
+    assert "violet" in html
+    assert "payment_intent.created" in html
+
+
+def test_fragment_renders_no_integration_badge_when_none():
+    """When detected_integration is None, no integration badge is rendered."""
+    env = Environment(
+        loader=FileSystemLoader(str(_TEMPLATES_DIR)),
+        autoescape=select_autoescape(),
+    )
+    template = env.get_template("request_fragment.html")
+    html = template.render(
+        req=_req_dict_with_integration(None, None),
+        hook_url="http://hook.test",
+    )
+    # None of the integration chip classes should appear
+    assert "violet" not in html
+    # The li must still render without error
+    assert "<li" in html
+
+
+def test_fragment_integration_badge_uses_gray_for_unknown():
+    """Unknown integration name falls back to gray color."""
+    env = Environment(
+        loader=FileSystemLoader(str(_TEMPLATES_DIR)),
+        autoescape=select_autoescape(),
+    )
+    template = env.get_template("request_fragment.html")
+    html = template.render(
+        req=_req_dict_with_integration("unknown_future_service", None),
+        hook_url="http://hook.test",
+    )
+    assert "unknown_future_service" in html
+    assert "gray" in html
