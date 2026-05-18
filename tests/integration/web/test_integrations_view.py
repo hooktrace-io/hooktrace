@@ -4,19 +4,9 @@ Requires Docker (testcontainers Postgres) — CI boots Postgres automatically.
 Uses the app_client + ingestor_client fixtures from conftest.py.
 """
 
-import hashlib
-import hmac
-import time
-
 import pytest
 
-
-def _stripe_sig(body: bytes, secret: str) -> str:
-    """Compute a valid Stripe-Signature header value."""
-    ts = str(int(time.time()))
-    signed = f"{ts}.{body.decode()}".encode()
-    sig = hmac.new(secret.encode(), signed, hashlib.sha256).hexdigest()
-    return f"t={ts},v1={sig}"
+from tests._helpers.stripe import stripe_signature
 
 
 @pytest.mark.asyncio
@@ -43,7 +33,7 @@ async def test_integrations_endpoint_returns_aggregated_with_signature_status(
     resp = await ingestor_client.post(
         f"/h/{token}",
         content=valid_payload,
-        headers={"stripe-signature": _stripe_sig(valid_payload, secret)},
+        headers={"stripe-signature": stripe_signature(secret=secret, body=valid_payload)},
     )
     assert resp.status_code == 200
 
