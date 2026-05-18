@@ -17,9 +17,21 @@ import pytest
 from httpx import ASGITransport
 
 from tests.fakes import FakeMetricsCollector, FakeSchemaQueue
+from webhook_inspector.config import Settings
 from webhook_inspector.domain.entities.captured_request import CapturedRequest
 from webhook_inspector.domain.entities.endpoint import Endpoint
-from webhook_inspector.web.ingestor.deps import get_metrics, get_schema_queue
+from webhook_inspector.web.ingestor.deps import get_metrics, get_schema_queue, get_settings
+
+
+def _stub_settings() -> Settings:
+    """Build a Settings instance for tests without requiring env vars.
+
+    The capture route only reads `max_body_bytes`. Pass a placeholder for
+    every required field so Pydantic validation passes.
+    """
+    return Settings(
+        database_url="postgresql+psycopg://test:test@localhost:5432/test",
+    )
 
 
 def _make_endpoint(*, response_delay_ms: int = 0) -> Endpoint:
@@ -91,6 +103,7 @@ async def test_enqueue_called_when_detected_integration_is_set():
     app.dependency_overrides[get_capture_request] = lambda: stub_uc
     app.dependency_overrides[get_schema_queue] = lambda: fake_queue
     app.dependency_overrides[get_metrics] = lambda: fake_metrics
+    app.dependency_overrides[get_settings] = _stub_settings
 
     try:
         async with httpx.AsyncClient(
@@ -127,6 +140,7 @@ async def test_enqueue_not_called_when_no_integration_detected():
     app.dependency_overrides[get_capture_request] = lambda: stub_uc
     app.dependency_overrides[get_schema_queue] = lambda: fake_queue
     app.dependency_overrides[get_metrics] = lambda: fake_metrics
+    app.dependency_overrides[get_settings] = _stub_settings
 
     try:
         async with httpx.AsyncClient(
@@ -158,6 +172,7 @@ async def test_enqueue_failure_does_not_propagate():
     app.dependency_overrides[get_capture_request] = lambda: stub_uc
     app.dependency_overrides[get_schema_queue] = lambda: fake_queue
     app.dependency_overrides[get_metrics] = lambda: fake_metrics
+    app.dependency_overrides[get_settings] = _stub_settings
 
     try:
         async with httpx.AsyncClient(
