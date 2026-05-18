@@ -14,14 +14,23 @@ from sqlalchemy.ext.asyncio import (
 from webhook_inspector.application.use_cases.capture_request import CaptureRequest
 from webhook_inspector.config import Settings
 from webhook_inspector.domain.ports.blob_storage import BlobStorage
+from webhook_inspector.domain.ports.forward_queue import ForwardQueue
 from webhook_inspector.domain.ports.metrics_collector import MetricsCollector
+from webhook_inspector.infrastructure.queue.null_forward_queue import NullForwardQueue
 from webhook_inspector.infrastructure.repositories.endpoint_repository import (
     PostgresEndpointRepository,
+)
+from webhook_inspector.infrastructure.repositories.forward_repository import (
+    PostgresForwardRepository,
 )
 from webhook_inspector.infrastructure.repositories.request_repository import (
     PostgresRequestRepository,
 )
 from webhook_inspector.infrastructure.storage.factory import make_blob_storage
+
+# Module-level singleton set by lifespan when Redis is available.
+# None → NullForwardQueue() is returned by get_forward_queue().
+_forward_queue_singleton: ForwardQueue | None = None
 
 
 @lru_cache(maxsize=1)
@@ -72,6 +81,15 @@ async def get_session() -> AsyncIterator[AsyncSession]:
             raise
 
 
+def get_forward_queue() -> ForwardQueue:
+    """Return the singleton ArqForwardQueue if Redis was provisioned at startup,
+    else a NullForwardQueue (dev mode without Redis). Never raises.
+    """
+    if _forward_queue_singleton is not None:
+        return _forward_queue_singleton
+    return NullForwardQueue()
+
+
 async def get_capture_request(
     session: AsyncSession = Depends(get_session),  # noqa: B008
     settings: Settings = Depends(get_settings),  # noqa: B008
@@ -91,4 +109,6 @@ async def get_capture_request(
         inline_threshold=settings.body_inline_threshold_bytes,
         metrics=get_metrics(),
         secrets_key=key,
+        forward_repo=PostgresForwardRepository(session),
+        forward_queue=get_forward_queue(),
     )

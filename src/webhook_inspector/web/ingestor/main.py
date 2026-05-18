@@ -8,6 +8,7 @@ from webhook_inspector.observability.logging import configure_logging
 from webhook_inspector.observability.metrics import configure_metrics
 from webhook_inspector.observability.tracing import configure_tracing, instrument_app
 from webhook_inspector.web._secrets_key import _validate_secrets_key
+from webhook_inspector.web.ingestor import deps as ingestor_deps
 from webhook_inspector.web.ingestor.deps import _engine
 from webhook_inspector.web.ingestor.routes import router
 
@@ -22,7 +23,24 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Validate secrets key at startup so a misconfigured deploy fails fast.
     _validate_secrets_key(settings.secrets_encryption_key)
 
+    if settings.redis_url:
+        from arq import create_pool
+        from arq.connections import RedisSettings
+
+        from webhook_inspector.infrastructure.queue.arq_forward_queue import ArqForwardQueue
+
+        pool = await create_pool(RedisSettings.from_dsn(settings.redis_url))
+        ingestor_deps._forward_queue_singleton = ArqForwardQueue(pool)
+
     yield
+
+    # Shutdown: close the Redis pool if we opened one.
+    if ingestor_deps._forward_queue_singleton is not None:
+        from webhook_inspector.infrastructure.queue.arq_forward_queue import ArqForwardQueue
+
+        if isinstance(ingestor_deps._forward_queue_singleton, ArqForwardQueue):
+            await ingestor_deps._forward_queue_singleton._pool.aclose()
+        ingestor_deps._forward_queue_singleton = None
 
 
 app = FastAPI(title="Webhook Inspector — Ingestor", lifespan=lifespan)
