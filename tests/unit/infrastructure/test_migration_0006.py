@@ -30,17 +30,18 @@ def test_migration_0006_has_upgrade_and_downgrade() -> None:
 
 def test_migration_0006_upgrade_has_integration_check() -> None:
     """upgrade() source must reference the integration CHECK constraint name."""
-    import inspect
-
     mod = importlib.import_module("migrations.versions.0006_f88fffb1c697_schema_inference")
     src = inspect.getsource(mod.upgrade)
     assert "inferred_schemas_integration_check" in src
 
 
 def test_migration_0006_upgrade_has_key_index() -> None:
-    """upgrade() source must reference the unique index name."""
-    import inspect
-
+    """upgrade() source must reference the unique index name AND the exact
+    COALESCE expression that the ON CONFLICT clause depends on.
+    """
     mod = importlib.import_module("migrations.versions.0006_f88fffb1c697_schema_inference")
     src = inspect.getsource(mod.upgrade)
     assert "inferred_schemas_key_idx" in src
+    # The conflict-target expression must match this string byte-for-byte
+    # (Postgres requires expression equality, not just semantic equivalence).
+    assert "COALESCE(event_type, '')" in src

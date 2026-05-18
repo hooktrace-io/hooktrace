@@ -1,5 +1,6 @@
 """Canonical in-memory RequestRepository for unit tests."""
 
+from typing import Any
 from uuid import UUID
 
 from webhook_inspector.domain.entities.captured_request import CapturedRequest
@@ -65,7 +66,7 @@ class FakeRequestRepo(RequestRepository):
     async def count_by_endpoint(self, endpoint_id: UUID) -> int:
         return len([r for r in self.saved if r.endpoint_id == endpoint_id])
 
-    async def update_schema_drift(self, request_id: UUID, drift: dict | None) -> None:
+    async def update_schema_drift(self, request_id: UUID, drift: dict[str, Any] | None) -> None:
         for req in self.saved:
             if req.id == request_id:
                 object.__setattr__(req, "schema_drift", drift)
