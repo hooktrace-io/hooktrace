@@ -31,24 +31,21 @@ def test_settings_have_sensible_defaults_for_local():
         assert s.environment == "local"
 
 
-def test_settings_defaults_keep_gcs_and_no_otlp():
+def test_settings_defaults_local_blob_backend():
     s = Settings(database_url="postgresql+psycopg://x@y/z")
     assert s.blob_storage_backend == "local"
-    assert s.otlp_endpoint is None
     assert s.s3_bucket_name is None
 
 
-def test_settings_accepts_s3_backend_and_otlp(monkeypatch):
+def test_settings_accepts_s3_backend(monkeypatch):
     monkeypatch.setenv("DATABASE_URL", "postgresql+psycopg://x@y/z")
     monkeypatch.setenv("BLOB_STORAGE_BACKEND", "s3")
     monkeypatch.setenv("S3_BUCKET_NAME", "wi-blobs")
     monkeypatch.setenv("S3_ENDPOINT_URL", "https://acc.r2.cloudflarestorage.com")
-    monkeypatch.setenv("OTLP_ENDPOINT", "https://api.honeycomb.io")
     s = Settings()
     assert s.blob_storage_backend == "s3"
     assert s.s3_bucket_name == "wi-blobs"
     assert s.s3_endpoint_url == "https://acc.r2.cloudflarestorage.com"
-    assert s.otlp_endpoint == "https://api.honeycomb.io"
 
 
 def test_secrets_encryption_key_optional(monkeypatch):

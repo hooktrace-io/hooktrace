@@ -25,13 +25,6 @@ class Settings(BaseSettings):
     environment: str = "local"
     service_name: str = "webhook-inspector"
     log_level: str = "INFO"
-    cloud_trace_enabled: bool = False
-    cloud_metrics_enabled: bool = False
-    otlp_endpoint: str | None = None
-    otlp_headers: str | None = None
-    # 10% sampling stays well under Cloud Trace's 2.5M spans/month free tier
-    # even at 10x current traffic. Set TRACE_SAMPLE_RATIO=1.0 in dev for full traces.
-    trace_sample_ratio: float = 0.1
     redis_url: str | None = (
         None  # set as Fly secret on worker (Upstash, rediss://) + locally to redis://localhost:6379 for dev
     )

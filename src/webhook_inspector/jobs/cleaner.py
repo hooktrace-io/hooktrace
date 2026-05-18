@@ -41,14 +41,7 @@ async def run_cleanup(
 def main() -> None:
     settings = Settings()
     configure_logging(settings.log_level, settings.service_name + "-cleaner")
-    configure_tracing(
-        settings.service_name + "-cleaner",
-        settings.environment,
-        cloud_trace_enabled=settings.cloud_trace_enabled,
-        otlp_endpoint=settings.otlp_endpoint,
-        otlp_headers=settings.otlp_headers,
-        sample_ratio=settings.trace_sample_ratio,
-    )
+    configure_tracing(settings.service_name + "-cleaner", settings.environment)
 
     # Wire metrics (lazy import — short-lived job, keep boot fast)
     from opentelemetry import metrics as otel_metrics
@@ -61,12 +54,7 @@ def main() -> None:
         force_flush_metrics,
     )
 
-    configure_metrics(
-        service_name=settings.service_name + "-cleaner",
-        cloud_metrics_enabled=settings.cloud_metrics_enabled,
-        otlp_endpoint=settings.otlp_endpoint,
-        otlp_headers=settings.otlp_headers,
-    )
+    configure_metrics(service_name=settings.service_name + "-cleaner")
     collector = OtelMetricsCollector(otel_metrics.get_meter("webhook-inspector-cleaner"))
 
     try:
