@@ -15,9 +15,14 @@ primary_region = "cdg"
   worker = "arq webhook_inspector.jobs.worker.WorkerSettings"
 
 [env]
-  ENVIRONMENT  = "prod"
-  LOG_LEVEL    = "INFO"
-  SERVICE_NAME = "webhook-inspector"
+  ENVIRONMENT          = "prod"
+  LOG_LEVEL            = "INFO"
+  SERVICE_NAME         = "webhook-inspector"
+  # Match web/ingestor: the worker reads R2-offloaded webhook bodies during
+  # schema inference and forwarding. Without these, make_blob_storage falls
+  # back to LocalBlobStorage → silent FileNotFoundError at job time.
+  BLOB_STORAGE_BACKEND = "s3"
+  S3_REGION            = "auto"
   # No PORT — worker has no http_service block. Fly knows not to wire a
   # public listener.
 
