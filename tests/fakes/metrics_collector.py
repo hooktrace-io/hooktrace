@@ -18,6 +18,8 @@ class FakeMetricsCollector(MetricsCollector):
     endpoints_created_count: int = 0
     captured_calls: list[CapturedCall] = field(default_factory=list)
     cleaner_runs: list[int] = field(default_factory=list)
+    schema_inference_calls: list[str] = field(default_factory=list)
+    schema_enqueue_failed_count: int = 0
 
     def endpoint_created(self) -> None:
         self.endpoints_created_count += 1
@@ -36,3 +38,9 @@ class FakeMetricsCollector(MetricsCollector):
 
     def cleaner_run(self, deleted: int) -> None:
         self.cleaner_runs.append(deleted)
+
+    def schema_inference(self, *, status: str) -> None:
+        self.schema_inference_calls.append(status)
+
+    def schema_enqueue_failed(self) -> None:
+        self.schema_enqueue_failed_count += 1
