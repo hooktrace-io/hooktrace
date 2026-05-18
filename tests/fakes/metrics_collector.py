@@ -21,6 +21,8 @@ class FakeMetricsCollector(MetricsCollector):
     replay_attempt_calls: list[str] = field(default_factory=list)
     ssrf_block_calls: list[str] = field(default_factory=list)
     ssrf_dns_validation_calls: list[str] = field(default_factory=list)
+    forward_attempt_calls: list[str] = field(default_factory=list)
+    forward_enqueue_failed_count: int = 0
 
     def endpoint_created(self) -> None:
         self.endpoints_created_count += 1
@@ -48,3 +50,9 @@ class FakeMetricsCollector(MetricsCollector):
 
     def ssrf_dns_validation(self, *, result: str) -> None:
         self.ssrf_dns_validation_calls.append(result)
+
+    def forward_attempt(self, *, status: str) -> None:
+        self.forward_attempt_calls.append(status)
+
+    def forward_enqueue_failed(self) -> None:
+        self.forward_enqueue_failed_count += 1

@@ -51,6 +51,14 @@ class OtelMetricsCollector(MetricsCollector):
             "webhook_inspector.ssrf.dns_validation_total",
             description="SSRF DNS validation outcomes, labelled by result.",
         )
+        self._forward_attempt = meter.create_counter(
+            "webhook_inspector.forward.attempt_total",
+            description="Forward attempt outcomes, labelled by status.",
+        )
+        self._forward_enqueue_failed = meter.create_counter(
+            "webhook_inspector.forward.enqueue_failed_total",
+            description="Best-effort enqueue failures (Redis unreachable at capture time).",
+        )
 
     def endpoint_created(self) -> None:
         self._endpoints_created.add(1)
@@ -81,3 +89,9 @@ class OtelMetricsCollector(MetricsCollector):
 
     def ssrf_dns_validation(self, *, result: str) -> None:
         self._ssrf_dns_validation.add(1, {"result": result})
+
+    def forward_attempt(self, *, status: str) -> None:
+        self._forward_attempt.add(1, {"status": status})
+
+    def forward_enqueue_failed(self) -> None:
+        self._forward_enqueue_failed.add(1)
