@@ -72,6 +72,9 @@ class PostgresSchemaRepository(SchemaRepository):
             },
         )
 
+    async def acquire_advisory_lock(self, key: int) -> None:
+        await self._session.execute(text("SELECT pg_advisory_xact_lock(:k)"), {"k": key})
+
 
 def _to_entity(row: InferredSchemaTable) -> InferredSchema:
     return InferredSchema(
