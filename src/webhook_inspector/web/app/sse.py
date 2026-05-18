@@ -14,9 +14,11 @@ from webhook_inspector.infrastructure.repositories.endpoint_repository import (
 from webhook_inspector.infrastructure.repositories.request_repository import (
     PostgresRequestRepository,
 )
+from webhook_inspector.web.app.template_globals import apply_globals
 
 _TEMPLATES_DIR = Path(__file__).parent / "templates"
 _env = Environment(loader=FileSystemLoader(str(_TEMPLATES_DIR)), autoescape=select_autoescape())
+apply_globals(_env)
 
 
 def _sse_counter() -> UpDownCounter:

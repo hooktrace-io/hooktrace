@@ -14,6 +14,17 @@ from webhook_inspector.domain.entities.captured_request import (
     CapturedRequest,
 )
 from webhook_inspector.web.app.routes import RequestItem
+from webhook_inspector.web.app.template_globals import apply_globals
+
+
+def _make_env() -> Environment:
+    env = Environment(
+        loader=FileSystemLoader(str(_TEMPLATES_DIR)),
+        autoescape=select_autoescape(),
+    )
+    apply_globals(env)
+    return env
+
 
 # ---------------------------------------------------------------------------
 # Surface 2 & 3: RequestItem Pydantic schema + list_requests JSON
@@ -114,10 +125,7 @@ _TEMPLATES_DIR = (
 
 
 def _render_fragment(signature_status: str | None) -> str:
-    env = Environment(
-        loader=FileSystemLoader(str(_TEMPLATES_DIR)),
-        autoescape=select_autoescape(),
-    )
+    env = _make_env()
     template = env.get_template("request_fragment.html")
     return template.render(
         req=_req_dict(signature_status=signature_status),
@@ -265,10 +273,7 @@ def test_fragment_dict_includes_integration_fields():
 
 def test_fragment_renders_integration_badge_for_stripe():
     """Stripe integration renders violet badge with event type."""
-    env = Environment(
-        loader=FileSystemLoader(str(_TEMPLATES_DIR)),
-        autoescape=select_autoescape(),
-    )
+    env = _make_env()
     template = env.get_template("request_fragment.html")
     html = template.render(
         req=_req_dict_with_integration("stripe", "payment_intent.created"),
@@ -281,10 +286,7 @@ def test_fragment_renders_integration_badge_for_stripe():
 
 def test_fragment_renders_no_integration_badge_when_none():
     """When detected_integration is None, no integration badge is rendered."""
-    env = Environment(
-        loader=FileSystemLoader(str(_TEMPLATES_DIR)),
-        autoescape=select_autoescape(),
-    )
+    env = _make_env()
     template = env.get_template("request_fragment.html")
     html = template.render(
         req=_req_dict_with_integration(None, None),
@@ -298,10 +300,7 @@ def test_fragment_renders_no_integration_badge_when_none():
 
 def test_fragment_integration_badge_uses_gray_for_unknown():
     """Unknown integration name falls back to gray color."""
-    env = Environment(
-        loader=FileSystemLoader(str(_TEMPLATES_DIR)),
-        autoescape=select_autoescape(),
-    )
+    env = _make_env()
     template = env.get_template("request_fragment.html")
     html = template.render(
         req=_req_dict_with_integration("unknown_future_service", None),
