@@ -31,6 +31,12 @@ class FakeSchemaRepository(SchemaRepository):
     async def upsert_with_version(self, schema: InferredSchema) -> None:
         self.schemas[self._key(schema.endpoint_id, schema.integration, schema.event_type)] = schema
 
+    async def list_by_endpoint(self, endpoint_id: UUID) -> list[InferredSchema]:
+        return sorted(
+            [s for s in self.schemas.values() if s.endpoint_id == endpoint_id],
+            key=lambda s: (s.integration, s.event_type or ""),
+        )
+
     async def acquire_advisory_lock(self, key: int) -> None:
         # No-op in tests — advisory locking is a Postgres concern.
         pass
