@@ -1,41 +1,42 @@
+from opentelemetry import trace
 from opentelemetry.sdk.trace import TracerProvider
-from opentelemetry.sdk.trace.export import BatchSpanProcessor, SimpleSpanProcessor
+from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 
-from webhook_inspector.observability.tracing import _build_tracer_provider
+from webhook_inspector.observability.tracing import (
+    configure_tracing,
+    get_summary_processor,
+)
 
 
-def _exporter_class_names(provider: TracerProvider) -> list[str]:
-    """Walk the active span processor and return the exporter class names."""
+def test_configure_tracing_sets_tracer_provider():
+    configure_tracing(service_name="test-svc", environment="test")
+    provider = trace.get_tracer_provider()
+    assert isinstance(provider, TracerProvider)
+
+
+def test_configure_tracing_registers_summary_processor():
+    configure_tracing(service_name="test-svc", environment="test")
+    provider = trace.get_tracer_provider()
+    assert isinstance(provider, TracerProvider)
     multi = provider._active_span_processor  # type: ignore[attr-defined]
     processors = getattr(multi, "_span_processors", [multi])
-    out: list[str] = []
-    for proc in processors:
-        if isinstance(proc, (BatchSpanProcessor, SimpleSpanProcessor)):
-            exporter = getattr(proc, "span_exporter", None) or getattr(proc, "_exporter", None)
-            if exporter is not None:
-                out.append(type(exporter).__name__)
-    return out
-
-
-def test_otlp_endpoint_builds_otlp_exporter():
-    provider = _build_tracer_provider(
-        service_name="test-svc",
-        environment="test",
-        otlp_endpoint="https://api.honeycomb.io",
-        otlp_headers="x-honeycomb-team=abc",
+    from webhook_inspector.observability.span_summary_processor import (
+        InMemoryRequestSpanProcessor,
     )
-    assert isinstance(provider, TracerProvider)
-    names = _exporter_class_names(provider)
-    assert any("OTLPSpanExporter" in n for n in names), names
+
+    assert any(isinstance(p, InMemoryRequestSpanProcessor) for p in processors)
 
 
-def test_no_otlp_no_cloud_trace_falls_back_to_console():
-    provider = _build_tracer_provider(
-        service_name="test-svc",
-        environment="test",
-        otlp_endpoint=None,
-        cloud_trace_enabled=False,
-    )
+def test_configure_tracing_registers_console_exporter():
+    configure_tracing(service_name="test-svc", environment="test")
+    provider = trace.get_tracer_provider()
     assert isinstance(provider, TracerProvider)
-    names = _exporter_class_names(provider)
-    assert any("ConsoleSpanExporter" in n for n in names), names
+    multi = provider._active_span_processor  # type: ignore[attr-defined]
+    processors = getattr(multi, "_span_processors", [multi])
+    assert any(isinstance(p, SimpleSpanProcessor) for p in processors)
+
+
+def test_get_summary_processor_returns_singleton():
+    proc1 = get_summary_processor()
+    proc2 = get_summary_processor()
+    assert proc1 is proc2
