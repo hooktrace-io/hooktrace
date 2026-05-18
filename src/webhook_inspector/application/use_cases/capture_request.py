@@ -11,6 +11,7 @@ from webhook_inspector.domain.ports.blob_storage import BlobStorage
 from webhook_inspector.domain.ports.endpoint_repository import EndpointRepository
 from webhook_inspector.domain.ports.metrics_collector import MetricsCollector
 from webhook_inspector.domain.ports.request_repository import RequestRepository
+from webhook_inspector.domain.ports.schema_queue import SchemaQueue
 from webhook_inspector.domain.services.body_parsers import (
     extract_stripe_event_type,
     parse_form_params,
@@ -34,6 +35,7 @@ class CaptureRequest:
     inline_threshold: int
     metrics: MetricsCollector
     secrets_key: bytes  # 32-byte AES-256 key decoded from Settings.secrets_encryption_key
+    schema_queue: SchemaQueue
     # notifier dropped — NOTIFY now happens in request_repo.save() transactionally
 
     async def execute(
@@ -126,6 +128,24 @@ class CaptureRequest:
 
         await self.request_repo.save(captured)
         await self.endpoint_repo.increment_request_count(endpoint.id)
+
+        # Best-effort schema inference enqueue. Mirrors PR7 forward enqueue:
+        # capture succeeds even if Redis is down; the user has the captured
+        # request; only the drift annotation degrades.
+        if captured.detected_integration is not None:
+            try:
+                await self.schema_queue.enqueue(
+                    captured.id,
+                    endpoint_id=endpoint.id,
+                    integration=captured.detected_integration,
+                    event_type=captured.detected_event_type,
+                )
+            except Exception as e:  # noqa: BLE001
+                logger.warning(
+                    "schema_enqueue_failed",
+                    extra={"request_id": str(captured.id), "error": str(e)},
+                )
+                self.metrics.schema_enqueue_failed()
 
         duration = time.monotonic() - start
         self.metrics.request_captured(

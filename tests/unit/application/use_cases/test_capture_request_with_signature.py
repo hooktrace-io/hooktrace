@@ -9,7 +9,13 @@ from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 from tests._helpers.stripe import stripe_signature
-from tests.fakes import FakeBlobStorage, FakeEndpointRepo, FakeMetricsCollector, FakeRequestRepo
+from tests.fakes import (
+    FakeBlobStorage,
+    FakeEndpointRepo,
+    FakeMetricsCollector,
+    FakeRequestRepo,
+    FakeSchemaQueue,
+)
 from webhook_inspector.application.use_cases.capture_request import CaptureRequest
 from webhook_inspector.domain.entities.endpoint import Endpoint
 from webhook_inspector.infrastructure.crypto.secrets import encrypt_secret
@@ -50,6 +56,7 @@ def _make_use_case(endpoint: Endpoint) -> tuple[CaptureRequest, FakeRequestRepo]
         inline_threshold=8192,
         metrics=FakeMetricsCollector(),
         secrets_key=_TEST_KEY,
+        schema_queue=FakeSchemaQueue(),
     )
     return uc, rrepo
 
@@ -177,6 +184,7 @@ async def test_capture_unknown_validator_falls_back_to_no_provider(monkeypatch):
         inline_threshold=8192,
         metrics=FakeMetricsCollector(),
         secrets_key=_TEST_KEY,
+        schema_queue=FakeSchemaQueue(),
     )
 
     captured, _endpoint = await uc.execute(

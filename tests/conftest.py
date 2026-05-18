@@ -154,6 +154,8 @@ async def ingestor_client(monkeypatch, database_url, engine, _reset_summary_proc
         ing_deps.get_metrics,
     ):
         fn.cache_clear()
+    # Reset the schema queue singleton so each test starts with a clean state.
+    ing_deps._schema_queue_singleton = None
     async with LifespanManager(ingestor_app):
         async with httpx.AsyncClient(
             transport=ASGITransport(app=ingestor_app), base_url="http://test"
