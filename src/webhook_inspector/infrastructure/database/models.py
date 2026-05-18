@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Any
 from uuid import UUID, uuid4
 
 from sqlalchemy import Column, Computed, LargeBinary
@@ -53,6 +54,11 @@ class RequestTable(SQLModel, table=True):
     detected_integration: str | None = Field(default=None)
     detected_event_type: str | None = Field(default=None)
 
+    # V3 — schema drift (PR3)
+    schema_drift: dict[str, Any] | None = Field(
+        default=None, sa_column=Column(JSONB, nullable=True)
+    )
+
     # V2.5 — generated tsvector column for full-text search. Mirrors the
     # GENERATED ALWAYS expression in migration 0003 so SQLAlchemy:
     #   - never tries to INSERT/UPDATE this column (Computed handles it),
@@ -73,3 +79,25 @@ class RequestTable(SQLModel, table=True):
             nullable=True,
         ),
     )
+
+
+class InferredSchemaTable(SQLModel, table=True):
+    __tablename__ = "inferred_schemas"
+
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    endpoint_id: UUID = Field(
+        foreign_key="endpoints.id",
+        nullable=False,
+        index=True,
+    )
+    integration: str = Field(nullable=False)
+    event_type: str | None = Field(default=None)
+    # Field name "schema_json" shadows SQLModel/Pydantic's schema_json() method.
+    # Using "schema_data" as the Python attribute while mapping to the DB column
+    # "schema_json" (matching migration 0006) avoids the shadowing.
+    schema_data: dict[str, Any] = Field(sa_column=Column("schema_json", JSONB, nullable=False))
+    sample_count: int = Field(default=0, nullable=False)
+    version: int = Field(default=0, nullable=False)
+    last_field_added_at: datetime | None = Field(default=None)
+    created_at: datetime = Field(nullable=False)
+    updated_at: datetime = Field(nullable=False)

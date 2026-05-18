@@ -80,3 +80,58 @@ async def test_save_persists_none_when_no_integration():
     row = session.add.call_args[0][0]
     assert row.detected_integration is None
     assert row.detected_event_type is None
+
+
+def _make_captured_with_drift(
+    schema_drift: dict | None = None,
+) -> CapturedRequest:
+    return CapturedRequest(
+        id=uuid4(),
+        endpoint_id=uuid4(),
+        method="POST",
+        path="/h/abc",
+        query_string=None,
+        headers={"content-type": "application/json"},
+        body_preview='{"type":"charge.created"}',
+        body_size=25,
+        blob_key=None,
+        source_ip="1.2.3.4",
+        received_at=datetime.now(UTC),
+        signature_status="no_provider",
+        schema_drift=schema_drift,
+    )
+
+
+@pytest.mark.asyncio
+async def test_save_persists_schema_drift():
+    """RequestTable row passed to session.add() must carry schema_drift."""
+    drift = {"new_fields": ["amount_details"], "removed_fields": []}
+    request = _make_captured_with_drift(schema_drift=drift)
+
+    session = MagicMock()
+    session.add = MagicMock()
+    session.flush = AsyncMock()
+    session.execute = AsyncMock()
+
+    repo = PostgresRequestRepository(session)
+    await repo.save(request)
+
+    row = session.add.call_args[0][0]
+    assert row.schema_drift == drift
+
+
+@pytest.mark.asyncio
+async def test_save_persists_none_schema_drift():
+    """When schema_drift is None, RequestTable row must have None."""
+    request = _make_captured_with_drift(schema_drift=None)
+
+    session = MagicMock()
+    session.add = MagicMock()
+    session.flush = AsyncMock()
+    session.execute = AsyncMock()
+
+    repo = PostgresRequestRepository(session)
+    await repo.save(request)
+
+    row = session.add.call_args[0][0]
+    assert row.schema_drift is None
