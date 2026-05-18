@@ -110,6 +110,12 @@ def _diff_recursive(
                 removed=removed,
                 changed=changed,
             )
+        elif old_sub != new_sub:
+            # Catch-all for non-object sub-schemas that differ beyond the
+            # top-level `type` field — anyOf / oneOf / enum / format /
+            # constraint changes. Without this, mutations inside opaque
+            # sub-schemas would be silently invisible.
+            changed.append(_join(path, key))
 
 
 def _join(prefix: str, key: str) -> str:

@@ -196,3 +196,25 @@ class TestDiffSchemas:
         assert result["added"] == ["status"]
         assert result["removed"] == []
         assert result["changed"] == []
+
+    def test_diff_detects_change_inside_non_object_sub_schema(self):
+        """Same `type` but different sub-schema details (enum, format, anyOf…)
+        must surface in `changed` — otherwise mutations inside opaque
+        sub-schemas would be silently invisible to drift detection.
+        """
+        old = {
+            "type": "object",
+            "properties": {
+                "status": {"type": "string", "enum": ["pending", "paid"]},
+            },
+        }
+        new = {
+            "type": "object",
+            "properties": {
+                "status": {"type": "string", "enum": ["pending", "paid", "failed"]},
+            },
+        }
+        result = diff_schemas(old, new)
+        assert result["changed"] == ["status"]
+        assert result["added"] == []
+        assert result["removed"] == []
