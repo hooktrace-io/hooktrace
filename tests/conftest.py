@@ -7,7 +7,6 @@ import pytest
 from asgi_lifespan import LifespanManager
 from httpx import ASGITransport
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-from sqlmodel import SQLModel
 from testcontainers.postgres import PostgresContainer
 
 from webhook_inspector.web.app.main import app as web_app
@@ -37,12 +36,26 @@ def database_url(postgres_container: PostgresContainer) -> str:
 
 @pytest.fixture(scope="session")
 async def engine(database_url: str):
-    eng = create_async_engine(database_url, future=True)
-    async with eng.begin() as conn:
-        # Register all models
-        from webhook_inspector.infrastructure.database import models  # noqa: F401
+    """Build schema via alembic migrations — matches production exactly.
 
-        await conn.run_sync(SQLModel.metadata.create_all)
+    Switched from `SQLModel.metadata.create_all` once migrations started
+    introducing expression-based indexes and CHECK constraints that the
+    ORM metadata can't represent (e.g. migration 0006's partial unique
+    index on `COALESCE(event_type, '')`). Without migrations, ON CONFLICT
+    upserts that target those indexes silently fail in tests.
+    """
+    eng = create_async_engine(database_url, future=True)
+    # Run alembic upgrade head against this test database. Use a sync URL
+    # since alembic operates synchronously.
+    from alembic import command
+    from alembic.config import Config
+
+    sync_url = database_url.replace("+psycopg_async", "+psycopg").replace(
+        "postgresql+psycopg://", "postgresql://"
+    )
+    cfg = Config("alembic.ini")
+    cfg.set_main_option("sqlalchemy.url", sync_url)
+    command.upgrade(cfg, "head")
     yield eng
     await eng.dispose()
 
