@@ -56,6 +56,7 @@ async def startup(ctx: dict[str, object]) -> None:
     session_factory: async_sessionmaker[AsyncSession] = async_sessionmaker(
         engine, expire_on_commit=False, class_=AsyncSession
     )
+    ctx["_engine"] = engine
     ctx["_session_factory"] = session_factory
 
     from webhook_inspector.infrastructure.storage.factory import make_blob_storage
@@ -76,12 +77,20 @@ async def startup(ctx: dict[str, object]) -> None:
     ctx["_settings"] = settings
 
 
-async def shutdown(_ctx: dict[str, object]) -> None:
-    """arq on_shutdown hook — flush any pending OTEL metrics before exit.
+async def shutdown(ctx: dict[str, object]) -> None:
+    """arq on_shutdown hook — flush OTEL metrics and dispose the DB engine.
     CLAUDE.md: short-lived jobs (and any process that may be killed
     by Fly machine rotation) MUST force_flush_metrics() or the last interval's
     datapoints are lost.
     """
+    try:
+        from sqlalchemy.ext.asyncio import AsyncEngine
+
+        engine = ctx.get("_engine")
+        if isinstance(engine, AsyncEngine):
+            await engine.dispose()
+    except Exception:  # noqa: BLE001
+        logger.warning("worker_engine_dispose_failed", exc_info=True)
     force_flush_metrics()
     logger.info("worker_shutdown")
 
@@ -138,13 +147,14 @@ class WorkerSettings:
 
     # Retry policy. NOT 1: a non-zero margin lets arq pick up a job whose
     # function crashed before its own retry logic ran (e.g. OOM, SIGTERM
-    # mid-call, bug in PR7's setup code). PR7's domain retry layer still
-    # owns the actual retry budget; this is the floor.
+    # mid-call). The domain advisory-lock retry layer still owns the actual
+    # retry budget; this is the floor.
     max_tries = 2
 
-    # Per-job wall-clock cap. PR4 SafeReplayTarget has timeout=10s. With
-    # PR7's likely retry-with-backoff (1s + 2s + 4s + 10s call) up to
-    # ~3 attempts, 120s leaves room. Adjust here if PR7 widens the budget.
+    # job_timeout bounds the worker's worst-case wait on the advisory lock —
+    # under the worker's max_jobs concurrency, two arq workers racing on the
+    # same (endpoint, integration, event_type) key serialize via Postgres,
+    # capped at this timeout. Tune in tandem with the forwarding retry config.
     job_timeout = 120
 
     # Concurrency cap per worker process. 256 MB VM x ~5 MB per concurrent
