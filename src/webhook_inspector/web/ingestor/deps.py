@@ -110,5 +110,4 @@ async def get_capture_request(
         inline_threshold=settings.body_inline_threshold_bytes,
         metrics=get_metrics(),
         secrets_key=key,
-        schema_queue=get_schema_queue(),
     )

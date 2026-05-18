@@ -1,7 +1,9 @@
 import asyncio
+import logging
 import uuid
+from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -11,12 +13,46 @@ from webhook_inspector.application.use_cases.capture_request import (
     EndpointNotFoundError,
 )
 from webhook_inspector.config import Settings
+from webhook_inspector.domain.ports.metrics_collector import MetricsCollector
+from webhook_inspector.domain.ports.schema_queue import SchemaQueue
 from webhook_inspector.web.ingestor.deps import (
     _blob_storage,
     get_capture_request,
+    get_metrics,
+    get_schema_queue,
     get_session,
     get_settings,
 )
+
+logger = logging.getLogger(__name__)
+
+
+async def _safe_enqueue(
+    queue: SchemaQueue,
+    request_id: UUID,
+    endpoint_id: UUID,
+    integration: str,
+    event_type: str | None,
+    metrics: MetricsCollector,
+) -> None:
+    """Background-task wrapper around SchemaQueue.enqueue. Best-effort :
+    a failed enqueue must not crash the response (which has already been
+    sent by the time this runs). Logs + increments the failure counter.
+    """
+    try:
+        await queue.enqueue(
+            request_id,
+            endpoint_id=endpoint_id,
+            integration=integration,
+            event_type=event_type,
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.warning(
+            "schema_enqueue_failed",
+            extra={"request_id": str(request_id), "error": str(e)},
+        )
+        metrics.schema_enqueue_failed()
+
 
 router = APIRouter()
 
@@ -66,8 +102,11 @@ async def capture(
     token: str,
     rest: str,
     request: Request,
+    background_tasks: BackgroundTasks,
     use_case: CaptureRequest = Depends(get_capture_request),  # noqa: B008
     settings: Settings = Depends(get_settings),  # noqa: B008
+    schema_queue: SchemaQueue = Depends(get_schema_queue),  # noqa: B008
+    metrics: MetricsCollector = Depends(get_metrics),  # noqa: B008
 ) -> Response:
     content_length = request.headers.get("content-length")
     if content_length and int(content_length) > settings.max_body_bytes:
@@ -89,6 +128,17 @@ async def capture(
         )
     except EndpointNotFoundError as e:
         raise HTTPException(status_code=404, detail="endpoint not found") from e
+
+    if _captured.detected_integration is not None:
+        background_tasks.add_task(
+            _safe_enqueue,
+            schema_queue,
+            _captured.id,
+            endpoint.id,
+            _captured.detected_integration,
+            _captured.detected_event_type,
+            metrics,
+        )
 
     if endpoint.response_delay_ms > 0:
         await asyncio.sleep(endpoint.response_delay_ms / 1000)

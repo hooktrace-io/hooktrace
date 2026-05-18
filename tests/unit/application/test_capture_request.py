@@ -8,7 +8,6 @@ from tests.fakes import (
     FakeEndpointRepo,
     FakeMetricsCollector,
     FakeRequestRepo,
-    FakeSchemaQueue,
 )
 from webhook_inspector.application.use_cases.capture_request import (
     CaptureRequest,
@@ -43,7 +42,6 @@ async def test_capture_small_body_inline():
         inline_threshold=8192,
         metrics=FakeMetricsCollector(),
         secrets_key=_NO_KEY,
-        schema_queue=FakeSchemaQueue(),
     )
 
     _captured, _endpoint = await uc.execute(
@@ -75,7 +73,6 @@ async def test_capture_large_body_uploads_blob():
         inline_threshold=8192,
         metrics=FakeMetricsCollector(),
         secrets_key=_NO_KEY,
-        schema_queue=FakeSchemaQueue(),
     )
 
     big = b"x" * 10000
@@ -105,7 +102,6 @@ async def test_capture_falls_back_when_blob_storage_fails():
         inline_threshold=8192,
         metrics=FakeMetricsCollector(),
         secrets_key=_NO_KEY,
-        schema_queue=FakeSchemaQueue(),
     )
 
     big = b"x" * 10000
@@ -136,7 +132,6 @@ async def test_capture_unknown_token_raises():
         inline_threshold=8192,
         metrics=FakeMetricsCollector(),
         secrets_key=_NO_KEY,
-        schema_queue=FakeSchemaQueue(),
     )
 
     with pytest.raises(EndpointNotFoundError):
@@ -163,7 +158,6 @@ async def test_capture_uppercases_method():
         inline_threshold=8192,
         metrics=FakeMetricsCollector(),
         secrets_key=_NO_KEY,
-        schema_queue=FakeSchemaQueue(),
     )
 
     captured, _endpoint = await uc.execute(
@@ -192,7 +186,6 @@ async def test_capture_request_records_metric():
         inline_threshold=8192,
         metrics=metrics,
         secrets_key=_NO_KEY,
-        schema_queue=FakeSchemaQueue(),
     )
 
     await uc.execute(
@@ -231,7 +224,6 @@ async def test_capture_detects_stripe_integration():
         inline_threshold=8192,
         metrics=FakeMetricsCollector(),
         secrets_key=_NO_KEY,
-        schema_queue=FakeSchemaQueue(),
     )
 
     captured, _ = await uc.execute(
@@ -261,7 +253,6 @@ async def test_capture_stripe_body_without_type_field():
         inline_threshold=8192,
         metrics=FakeMetricsCollector(),
         secrets_key=_NO_KEY,
-        schema_queue=FakeSchemaQueue(),
     )
 
     captured, _ = await uc.execute(
@@ -291,7 +282,6 @@ async def test_capture_no_integration_headers_returns_none():
         inline_threshold=8192,
         metrics=FakeMetricsCollector(),
         secrets_key=_NO_KEY,
-        schema_queue=FakeSchemaQueue(),
     )
 
     captured, _ = await uc.execute(
@@ -321,7 +311,6 @@ async def test_capture_blob_fallback_preserves_integration():
         inline_threshold=8192,
         metrics=FakeMetricsCollector(),
         secrets_key=_NO_KEY,
-        schema_queue=FakeSchemaQueue(),
     )
 
     big = b'{"type": "charge.failed"}' * 500  # > 8192 bytes → triggers blob path
