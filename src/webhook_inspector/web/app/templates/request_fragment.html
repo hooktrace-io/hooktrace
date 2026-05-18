@@ -23,4 +23,9 @@
   <span class="text-{{ int_color }}-300 text-xs">{{ req.detected_event_type }}</span>
   {% endif %}
   {% endif %}
+  {% if req.schema_drift and (req.schema_drift.added or req.schema_drift.changed) %}
+  <span class="text-amber-400 text-xs" title="Schema drift detected">
+    🔔 drift
+  </span>
+  {% endif %}
 </li>
