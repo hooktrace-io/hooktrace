@@ -67,9 +67,10 @@ async def test_list_requests_includes_signature_status(monkeypatch, database_url
         resp = await c.get(f"/api/endpoints/{token}/requests")
     items = resp.json()["items"]
     assert len(items) == 1
-    # signature_status must be present in the JSON response (None for no-provider endpoint)
-    assert "signature_status" in items[0]
-    assert items[0]["signature_status"] is None
+    # CaptureRequest always assigns a non-NULL signature_status: when no
+    # provider is configured on the endpoint, it defaults to "no_provider".
+    # This invariant matters for PR2's GROUP BY signature_status aggregation.
+    assert items[0]["signature_status"] == "no_provider"
 
 
 async def test_list_requests_fragment_includes_signature_status(
@@ -96,8 +97,9 @@ async def test_list_requests_fragment_includes_signature_status(
     ) as c:
         await c.post(f"/h/{token}", content=b"hello")
 
-    # The fragment endpoint renders HTML; with no signature provider the badge
-    # should not appear (None), so we only verify no UndefinedError is thrown.
+    # The fragment renders HTML with a "no_provider" badge (slate color) since
+    # CaptureRequest defaults signature_status to that string. We only verify
+    # the endpoint returns 200 — no UndefinedError, template renders cleanly.
     async with httpx.AsyncClient(
         transport=ASGITransport(app=app_service), base_url="http://test"
     ) as c:
