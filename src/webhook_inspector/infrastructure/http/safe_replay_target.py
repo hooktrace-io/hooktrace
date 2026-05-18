@@ -1,0 +1,122 @@
+"""HTTP target with parse-time SSRF validation. NOTE: this does NOT mitigate
+DNS rebinding — httpx performs its own DNS lookup at connect time and we
+do NOT bind to the validated IP in V3. The validate-time resolution is
+used only to reject URLs whose hostname CURRENTLY resolves to private
+addresses (catches typos + naive attacks, fails against attacker-
+controlled DNS rebinding). See PR4 §"DNS rebinding — accepted V3 gap"
+for the V4 fix options.
+"""
+
+import ipaddress
+import socket
+from urllib.parse import urlsplit
+
+import httpx
+
+from webhook_inspector.domain.ports.http_replay_target import (
+    HttpReplayTarget,
+    SsrfBlockedError,
+    ValidatedTarget,
+)
+
+_ALLOWED_SCHEMES = frozenset({"http", "https"})
+_ALLOWED_PORTS = frozenset({80, 443})
+
+
+def _resolve(host: str) -> list[str]:
+    """Thin wrapper around getaddrinfo so tests can monkeypatch."""
+    infos = socket.getaddrinfo(host, None, type=socket.SOCK_STREAM)
+    return [str(info[4][0]) for info in infos]
+
+
+def _is_private_or_reserved(ip_str: str) -> bool:
+    ip = ipaddress.ip_address(ip_str)
+    return (
+        ip.is_private
+        or ip.is_loopback
+        or ip.is_link_local
+        or ip.is_multicast
+        or ip.is_reserved
+        or ip.is_unspecified
+    )
+
+
+class SafeReplayTarget(HttpReplayTarget):
+    def __init__(
+        self,
+        blocked_host_suffixes: tuple[str, ...] = (),
+        timeout_seconds: float = 10.0,
+        max_response_bytes: int = 256 * 1024,
+    ) -> None:
+        self._blocked_suffixes = tuple(s.lower() for s in blocked_host_suffixes)
+        self._timeout = timeout_seconds
+        self._max_response_bytes = max_response_bytes
+
+    def validate(self, url: str) -> ValidatedTarget:
+        parts = urlsplit(url)
+        if parts.scheme.lower() not in _ALLOWED_SCHEMES:
+            raise SsrfBlockedError(f"scheme not allowed: {parts.scheme}")
+        if parts.username or parts.password:
+            raise SsrfBlockedError("userinfo not allowed")
+        host = parts.hostname
+        if not host:
+            raise SsrfBlockedError("missing host")
+        port = parts.port or (443 if parts.scheme == "https" else 80)
+        if port not in _ALLOWED_PORTS:
+            raise SsrfBlockedError(f"port not allowed: {port}")
+        for suffix in self._blocked_suffixes:
+            if host.lower() == suffix or host.lower().endswith("." + suffix):
+                raise SsrfBlockedError(f"host suffix blocked: {host}")
+
+        try:
+            ipaddress.ip_address(host)
+            ips = [host]
+        except ValueError:
+            ips = _resolve(host)
+
+        if not ips:
+            raise SsrfBlockedError(f"DNS returned no addresses for {host}")
+        for ip in ips:
+            if _is_private_or_reserved(ip):
+                raise SsrfBlockedError(f"resolved to private/reserved IP: {ip}")
+
+        return ValidatedTarget(url=url, host=host, port=port, ip=ips[0])
+
+    async def send(
+        self,
+        *,
+        method: str,
+        validated: ValidatedTarget,
+        headers: dict[str, str],
+        body: bytes,
+    ) -> tuple[int, dict[str, str], bytes]:
+        """Issue the HTTP call. Returns (status_code, response_headers,
+        response_body) with body truncated to max_response_bytes.
+
+        NOTE re: DNS rebinding: httpx performs its OWN DNS resolution at
+        connect time. validate()'s resolution is used only to filter out
+        private/reserved IPs at parse time — the IP the connection actually
+        lands on can differ if the DNS record changes mid-call.
+
+        follow_redirects=False is MANDATORY: a public URL can 301 to a
+        private one, bypassing the entire SSRF guard. Do not flip without
+        re-validating each redirect hop.
+        """
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(self._timeout),
+            follow_redirects=False,
+            limits=httpx.Limits(max_connections=10),
+        ) as client:
+            resp = await client.request(
+                method=method,
+                url=validated.url,
+                headers=headers,
+                content=body,
+            )
+            body_out = bytearray()
+            async for chunk in resp.aiter_bytes(chunk_size=8192):
+                body_out.extend(chunk)
+                if len(body_out) >= self._max_response_bytes:
+                    body_out = body_out[: self._max_response_bytes]
+                    break
+            return resp.status_code, dict(resp.headers), bytes(body_out)
