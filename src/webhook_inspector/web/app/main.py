@@ -12,6 +12,7 @@ from webhook_inspector.infrastructure.notifications.postgres_notifier import Pos
 from webhook_inspector.observability.logging import configure_logging
 from webhook_inspector.observability.metrics import configure_metrics
 from webhook_inspector.observability.tracing import configure_tracing, instrument_app
+from webhook_inspector.web._secrets_key import _validate_secrets_key
 from webhook_inspector.web.app.deps import _engine
 from webhook_inspector.web.app.routes import router
 
@@ -37,6 +38,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         otlp_endpoint=settings.otlp_endpoint,
         otlp_headers=settings.otlp_headers,
     )
+
+    # Validate secrets key at startup so a misconfigured deploy fails fast.
+    _validate_secrets_key(settings.secrets_encryption_key)
 
     # Build notifier once and store on app.state so request-scoped deps can read it.
     sync_dsn = settings.database_url.replace("+psycopg_async", "").replace("+psycopg", "")
