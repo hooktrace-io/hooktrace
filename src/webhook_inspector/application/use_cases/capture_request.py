@@ -11,8 +11,13 @@ from webhook_inspector.domain.ports.blob_storage import BlobStorage
 from webhook_inspector.domain.ports.endpoint_repository import EndpointRepository
 from webhook_inspector.domain.ports.metrics_collector import MetricsCollector
 from webhook_inspector.domain.ports.request_repository import RequestRepository
+from webhook_inspector.domain.services.body_parsers import (
+    extract_stripe_event_type,
+    parse_form_params,
+)
 from webhook_inspector.domain.services.hmac.base import ValidationResult
 from webhook_inspector.domain.services.hmac.factory import get_validator
+from webhook_inspector.domain.services.integration_detector import detect_integration
 from webhook_inspector.infrastructure.crypto.secrets import decrypt_secret
 
 logger = logging.getLogger(__name__)
@@ -71,6 +76,17 @@ class CaptureRequest:
         else:
             signature_status = ValidationResult.NO_PROVIDER.value
 
+        content_type = headers.get("content-type", "")
+        form_params = parse_form_params(body, content_type)
+        user_agent = headers.get("user-agent", "")
+        integration, event_type = detect_integration(
+            headers=headers,
+            user_agent=user_agent,
+            form_params=form_params,
+        )
+        if integration == "stripe":
+            event_type = extract_stripe_event_type(body)
+
         captured = CapturedRequest.create(
             endpoint_id=endpoint.id,
             method=method.upper(),
@@ -81,6 +97,8 @@ class CaptureRequest:
             source_ip=source_ip,
             inline_threshold_bytes=self.inline_threshold,
             signature_status=signature_status,
+            detected_integration=integration,
+            detected_event_type=event_type,
         )
 
         if captured.blob_key is not None:
@@ -102,6 +120,8 @@ class CaptureRequest:
                     source_ip=captured.source_ip,
                     received_at=captured.received_at,
                     signature_status=captured.signature_status,
+                    detected_integration=captured.detected_integration,
+                    detected_event_type=captured.detected_event_type,
                 )
 
         await self.request_repo.save(captured)
