@@ -28,6 +28,8 @@ def test_processor_accumulates_spans_for_a_trace():
         assert "duration_ms" in span
         assert "status" in span
         assert "start_time_ns" in span
+        assert "span_id" in span
+        assert "depth" in span
 
 
 def test_processor_pops_clears_buffer():
@@ -105,6 +107,41 @@ def test_processor_parent_span_id_recorded():
     child_span = next(s for s in summary if s["name"] == "child")
     assert parent_span["parent_span_id"] is None
     assert child_span["parent_span_id"] == root_span_id
+
+
+def test_processor_span_id_recorded():
+    processor = InMemoryRequestSpanProcessor()
+    provider = TracerProvider()
+    provider.add_span_processor(processor)
+    tracer = provider.get_tracer("test")
+
+    with tracer.start_as_current_span("root") as root:
+        trace_id = format(root.get_span_context().trace_id, "032x")
+        root_span_id = format(root.get_span_context().span_id, "016x")
+
+    summary = processor.pop_summary(trace_id)
+    assert len(summary) == 1
+    assert summary[0]["span_id"] == root_span_id
+
+
+def test_processor_depth_computed():
+    processor = InMemoryRequestSpanProcessor()
+    provider = TracerProvider()
+    provider.add_span_processor(processor)
+    tracer = provider.get_tracer("test")
+
+    with tracer.start_as_current_span("root") as root:
+        trace_id = format(root.get_span_context().trace_id, "032x")
+        with tracer.start_as_current_span("child"):
+            with tracer.start_as_current_span("grandchild"):
+                pass
+
+    summary = processor.pop_summary(trace_id)
+    assert len(summary) == 3
+    depths = {s["name"]: s["depth"] for s in summary}
+    assert depths["root"] == 0
+    assert depths["child"] == 1
+    assert depths["grandchild"] == 2
 
 
 def test_processor_force_flush_returns_true():
