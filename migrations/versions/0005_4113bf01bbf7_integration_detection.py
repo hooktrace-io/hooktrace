@@ -21,6 +21,9 @@ depends_on: str | Sequence[str] | None = None
 def upgrade() -> None:
     op.add_column("requests", sa.Column("detected_integration", sa.Text(), nullable=True))
     op.add_column("requests", sa.Column("detected_event_type", sa.Text(), nullable=True))
+    # Keep the IN (...) list in sync with INTEGRATION_NAMES in
+    # domain/services/integration_detector.py — drift will surface as
+    # an ingest-time INSERT failure rather than a silent corruption.
     op.execute("""
         ALTER TABLE requests
         ADD CONSTRAINT requests_detected_integration_check
