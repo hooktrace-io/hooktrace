@@ -17,10 +17,12 @@
   <span class="text-{{ color }}-400 text-xs">{{ req.signature_status }}</span>
   {% endif %}
   {% if req.detected_integration %}
+  {# Integration colors avoid the signature_status palette (emerald/rose/amber/slate)
+     so the two badges remain visually distinct when both render on the same row. #}
   {% set int_color = {
-      "stripe": "violet", "github": "slate", "shopify": "emerald",
-      "twilio": "rose", "mailgun": "sky", "discord": "indigo",
-      "slack": "amber", "zapier": "orange", "n8n": "pink"
+      "stripe": "violet", "github": "zinc", "shopify": "green",
+      "twilio": "red", "mailgun": "sky", "discord": "indigo",
+      "slack": "yellow", "zapier": "orange", "n8n": "pink"
   }.get(req.detected_integration, "gray") %}
   <span class="text-{{ int_color }}-400 text-xs">{{ req.detected_integration }}</span>
   {% if req.detected_event_type %}
