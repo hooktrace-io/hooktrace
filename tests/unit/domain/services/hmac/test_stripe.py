@@ -1,22 +1,15 @@
 import hashlib
 import hmac
-import time
 
+from tests._helpers.stripe import stripe_signature
 from webhook_inspector.domain.services.hmac.base import ValidationResult
 from webhook_inspector.domain.services.hmac.stripe import StripeValidator
-
-
-def _make_stripe_signature(secret: str, payload: bytes, timestamp: int | None = None) -> str:
-    ts = timestamp or int(time.time())
-    signed = f"{ts}.{payload.decode('utf-8')}".encode()
-    sig = hmac.new(secret.encode(), signed, hashlib.sha256).hexdigest()
-    return f"t={ts},v1={sig}"
 
 
 def test_stripe_valid_signature_returns_valid():
     secret = "whsec_testsecret"
     body = b'{"id":"evt_1","type":"payment_intent.succeeded"}'
-    sig = _make_stripe_signature(secret, body)
+    sig = stripe_signature(secret=secret, body=body)
     validator = StripeValidator()
     assert (
         validator.validate(body=body, headers={"stripe-signature": sig}, secret=secret)
@@ -26,7 +19,7 @@ def test_stripe_valid_signature_returns_valid():
 
 def test_stripe_wrong_secret_returns_invalid():
     body = b'{"id":"evt_1"}'
-    sig = _make_stripe_signature("whsec_one", body)
+    sig = stripe_signature(secret="whsec_one", body=body)
     validator = StripeValidator()
     assert (
         validator.validate(body=body, headers={"stripe-signature": sig}, secret="whsec_two")
@@ -45,7 +38,7 @@ def test_stripe_missing_header_returns_missing():
 def test_stripe_tampered_body_returns_invalid():
     secret = "whsec_testsecret"
     body = b'{"id":"evt_1"}'
-    sig = _make_stripe_signature(secret, body)
+    sig = stripe_signature(secret=secret, body=body)
     validator = StripeValidator()
     assert (
         validator.validate(body=b'{"id":"evt_2"}', headers={"stripe-signature": sig}, secret=secret)

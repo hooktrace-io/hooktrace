@@ -5,12 +5,10 @@ regardless of whether a provider is configured. They use local fakes so
 Docker / testcontainers are NOT required.
 """
 
-import hashlib
-import hmac
-import time
 from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
+from tests._helpers.stripe import stripe_signature
 from tests.fakes.metrics_collector import FakeMetricsCollector
 from webhook_inspector.application.use_cases.capture_request import CaptureRequest
 from webhook_inspector.domain.entities.captured_request import CapturedRequest
@@ -126,13 +124,6 @@ def _make_use_case(endpoint: Endpoint) -> tuple[CaptureRequest, FakeRequestRepo]
     return uc, rrepo
 
 
-def _stripe_signature(body: bytes, secret: str) -> str:
-    ts = str(int(time.time()))
-    signed = f"{ts}.{body.decode('utf-8')}".encode()
-    sig = hmac.new(secret.encode(), signed, hashlib.sha256).hexdigest()
-    return f"t={ts},v1={sig}"
-
-
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
@@ -141,7 +132,7 @@ def _stripe_signature(body: bytes, secret: str) -> str:
 async def test_capture_with_valid_stripe_signature_records_valid_status():
     """Endpoint with Stripe HMAC config + body signed correctly → 'valid'."""
     body = b'{"id":"evt_1"}'
-    header = _stripe_signature(body, _SECRET_PLAIN)
+    header = stripe_signature(secret=_SECRET_PLAIN, body=body)
 
     endpoint = _make_endpoint(
         signature_provider="stripe",
@@ -167,7 +158,7 @@ async def test_capture_with_invalid_signature_records_invalid_status():
     """Same setup but signed with a different secret → 'invalid'."""
     body = b'{"id":"evt_1"}'
     # Sign with a DIFFERENT secret than what's stored on the endpoint.
-    header = _stripe_signature(body, "wrong_secret")
+    header = stripe_signature(secret="wrong_secret", body=body)
 
     endpoint = _make_endpoint(
         signature_provider="stripe",
