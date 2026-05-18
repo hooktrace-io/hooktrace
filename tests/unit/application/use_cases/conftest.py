@@ -12,6 +12,8 @@ Each test then receives a fresh ``InMemorySpanExporter`` added on top of the
 already-configured provider, so span assertions are isolated.
 """
 
+from collections.abc import Iterator
+
 import pytest
 from opentelemetry import trace
 from opentelemetry.sdk.trace import TracerProvider
@@ -34,11 +36,14 @@ def _install_tracing_provider() -> None:
 
 
 @pytest.fixture
-def span_exporter() -> InMemorySpanExporter:
+def span_exporter() -> Iterator[InMemorySpanExporter]:
     """Return a fresh InMemorySpanExporter added to the active provider.
 
     The provider is always a real TracerProvider here because
     ``_install_tracing_provider`` runs before any test in this package.
+
+    Shutdown the exporter on teardown so dead processors don't accumulate
+    on the shared provider across the test session.
     """
     provider = trace.get_tracer_provider()
     assert isinstance(provider, TracerProvider), (
@@ -46,4 +51,5 @@ def span_exporter() -> InMemorySpanExporter:
     )
     exporter = InMemorySpanExporter()
     provider.add_span_processor(SimpleSpanProcessor(exporter))
-    return exporter
+    yield exporter
+    exporter.shutdown()
