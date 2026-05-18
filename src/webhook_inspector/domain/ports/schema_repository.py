@@ -16,3 +16,10 @@ class SchemaRepository(ABC):
 
     @abstractmethod
     async def upsert_with_version(self, schema: InferredSchema) -> None: ...
+
+    @abstractmethod
+    async def acquire_advisory_lock(self, key: int) -> None:
+        """Acquire pg_advisory_xact_lock(key). Released automatically when the
+        enclosing transaction ends. Blocks until acquired ; arq's job_timeout
+        bounds the worst-case wait.
+        """
