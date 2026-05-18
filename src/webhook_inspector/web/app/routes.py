@@ -15,6 +15,7 @@ from webhook_inspector.application.use_cases.export_requests import (
     ExportRequests,
     ExportTooLargeError,
 )
+from webhook_inspector.application.use_cases.list_integrations import ListIntegrations
 from webhook_inspector.application.use_cases.list_requests import (
     EndpointNotFoundError,
     ListRequests,
@@ -33,6 +34,7 @@ from webhook_inspector.web.app.deps import (
     _session_factory,
     get_create_endpoint,
     get_export_requests,
+    get_list_integrations,
     get_list_requests,
     get_notifier,
     get_session,
@@ -162,6 +164,46 @@ async def update_config(
         )
     except EndpointNotFoundError as e:
         raise HTTPException(status_code=404, detail="endpoint not found") from e
+
+
+class IntegrationAggregateResponse(BaseModel):
+    integration: Literal[
+        "stripe",
+        "github",
+        "shopify",
+        "twilio",
+        "mailgun",
+        "discord",
+        "slack",
+        "zapier",
+        "n8n",
+    ]
+    total: int
+    event_types: dict[str, int]
+    signature_status_counts: dict[str, int]
+
+
+@router.get(
+    "/api/endpoints/{token}/integrations",
+    response_model=list[IntegrationAggregateResponse],
+)
+async def list_integrations_route(
+    token: str,
+    use_case: ListIntegrations = Depends(get_list_integrations),  # noqa: B008
+) -> list[IntegrationAggregateResponse]:
+    try:
+        aggregates = await use_case.execute_for_token(token)
+    except EndpointNotFoundError as e:
+        raise HTTPException(status_code=404, detail="endpoint not found") from e
+    return [
+        IntegrationAggregateResponse(
+            integration=a.integration,
+            total=a.total,
+            event_types=a.event_types,
+            signature_status_counts=a.signature_status_counts,
+        )
+        for a in aggregates
+    ]
 
 
 class RequestItem(BaseModel):
