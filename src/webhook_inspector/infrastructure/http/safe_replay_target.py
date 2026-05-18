@@ -64,8 +64,12 @@ class SafeReplayTarget(HttpReplayTarget):
         port = parts.port or (443 if parts.scheme == "https" else 80)
         if port not in _ALLOWED_PORTS:
             raise SsrfBlockedError(f"port not allowed: {port}")
+        # Strip trailing dot before suffix comparison: "app.hooktrace.io." is
+        # the same domain as "app.hooktrace.io" but would otherwise slip the
+        # suffix check.
+        host_normalized = host.rstrip(".").lower()
         for suffix in self._blocked_suffixes:
-            if host.lower() == suffix or host.lower().endswith("." + suffix):
+            if host_normalized == suffix or host_normalized.endswith("." + suffix):
                 raise SsrfBlockedError(f"host suffix blocked: {host}")
 
         try:
