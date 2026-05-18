@@ -1,14 +1,18 @@
 import logging
 import time
 from dataclasses import dataclass
+from datetime import UTC, datetime
 
 from cryptography.exceptions import InvalidTag
 
 from webhook_inspector.domain.entities.captured_request import CapturedRequest
 from webhook_inspector.domain.entities.endpoint import Endpoint
+from webhook_inspector.domain.entities.forward import Forward
 from webhook_inspector.domain.exceptions import EndpointNotFoundError
 from webhook_inspector.domain.ports.blob_storage import BlobStorage
 from webhook_inspector.domain.ports.endpoint_repository import EndpointRepository
+from webhook_inspector.domain.ports.forward_queue import ForwardQueue
+from webhook_inspector.domain.ports.forward_repository import ForwardRepository
 from webhook_inspector.domain.ports.metrics_collector import MetricsCollector
 from webhook_inspector.domain.ports.request_repository import RequestRepository
 from webhook_inspector.domain.services.body_parsers import (
@@ -34,6 +38,8 @@ class CaptureRequest:
     inline_threshold: int
     metrics: MetricsCollector
     secrets_key: bytes  # 32-byte AES-256 key decoded from Settings.secrets_encryption_key
+    forward_repo: ForwardRepository
+    forward_queue: ForwardQueue
     # notifier dropped — NOTIFY now happens in request_repo.save() transactionally
 
     async def execute(
@@ -126,6 +132,27 @@ class CaptureRequest:
 
         await self.request_repo.save(captured)
         await self.endpoint_repo.increment_request_count(endpoint.id)
+
+        if endpoint.forward_url:
+            try:
+                forward = Forward.create(
+                    request_id=captured.id,
+                    endpoint_id=endpoint.id,
+                    target_url=endpoint.forward_url,
+                    now=datetime.now(UTC),
+                )
+                await self.forward_repo.save(forward)
+                await self.forward_queue.enqueue(forward.id)
+            except Exception as e:  # noqa: BLE001
+                logger.warning(
+                    "forward_enqueue_failed",
+                    extra={
+                        "request_id": str(captured.id),
+                        "endpoint_id": str(endpoint.id),
+                        "error": str(e),
+                    },
+                )
+                self.metrics.forward_enqueue_failed()
 
         duration = time.monotonic() - start
         self.metrics.request_captured(
