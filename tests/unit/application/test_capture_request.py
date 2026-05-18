@@ -76,6 +76,11 @@ class FakeBlobStorage(BlobStorage):
         return self.puts.get(key)
 
 
+# Dummy 32-byte key; these tests don't configure a signature provider so the
+# key is never actually used for encryption/decryption.
+_NO_KEY = b"\x00" * 32
+
+
 def _make_endpoint() -> Endpoint:
     return Endpoint(
         id=uuid4(),
@@ -91,7 +96,14 @@ async def test_capture_small_body_inline():
     erepo = FakeEndpointRepo(ep)
     rrepo = FakeRequestRepo()
     blob = FakeBlobStorage()
-    uc = CaptureRequest(erepo, rrepo, blob, inline_threshold=8192, metrics=FakeMetricsCollector())
+    uc = CaptureRequest(
+        erepo,
+        rrepo,
+        blob,
+        inline_threshold=8192,
+        metrics=FakeMetricsCollector(),
+        secrets_key=_NO_KEY,
+    )
 
     _captured, _endpoint = await uc.execute(
         token="abc",
@@ -115,7 +127,14 @@ async def test_capture_large_body_uploads_blob():
     erepo = FakeEndpointRepo(ep)
     rrepo = FakeRequestRepo()
     blob = FakeBlobStorage()
-    uc = CaptureRequest(erepo, rrepo, blob, inline_threshold=8192, metrics=FakeMetricsCollector())
+    uc = CaptureRequest(
+        erepo,
+        rrepo,
+        blob,
+        inline_threshold=8192,
+        metrics=FakeMetricsCollector(),
+        secrets_key=_NO_KEY,
+    )
 
     big = b"x" * 10000
     captured, _endpoint = await uc.execute(
@@ -137,7 +156,14 @@ async def test_capture_falls_back_when_blob_storage_fails():
     erepo = FakeEndpointRepo(ep)
     rrepo = FakeRequestRepo()
     blob = FakeBlobStorage(fail=True)
-    uc = CaptureRequest(erepo, rrepo, blob, inline_threshold=8192, metrics=FakeMetricsCollector())
+    uc = CaptureRequest(
+        erepo,
+        rrepo,
+        blob,
+        inline_threshold=8192,
+        metrics=FakeMetricsCollector(),
+        secrets_key=_NO_KEY,
+    )
 
     big = b"x" * 10000
     captured, _endpoint = await uc.execute(
@@ -160,7 +186,14 @@ async def test_capture_unknown_token_raises():
     erepo = FakeEndpointRepo()
     rrepo = FakeRequestRepo()
     blob = FakeBlobStorage()
-    uc = CaptureRequest(erepo, rrepo, blob, inline_threshold=8192, metrics=FakeMetricsCollector())
+    uc = CaptureRequest(
+        erepo,
+        rrepo,
+        blob,
+        inline_threshold=8192,
+        metrics=FakeMetricsCollector(),
+        secrets_key=_NO_KEY,
+    )
 
     with pytest.raises(EndpointNotFoundError):
         await uc.execute(
@@ -179,7 +212,14 @@ async def test_capture_uppercases_method():
     erepo = FakeEndpointRepo(ep)
     rrepo = FakeRequestRepo()
     blob = FakeBlobStorage()
-    uc = CaptureRequest(erepo, rrepo, blob, inline_threshold=8192, metrics=FakeMetricsCollector())
+    uc = CaptureRequest(
+        erepo,
+        rrepo,
+        blob,
+        inline_threshold=8192,
+        metrics=FakeMetricsCollector(),
+        secrets_key=_NO_KEY,
+    )
 
     captured, _endpoint = await uc.execute(
         token="abc",
@@ -206,6 +246,7 @@ async def test_capture_request_records_metric():
         blob,
         inline_threshold=8192,
         metrics=metrics,
+        secrets_key=_NO_KEY,
     )
 
     await uc.execute(

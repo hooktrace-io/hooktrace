@@ -9,6 +9,9 @@ from webhook_inspector.domain.ports.blob_storage import BlobStorage
 from webhook_inspector.domain.ports.endpoint_repository import EndpointRepository
 from webhook_inspector.domain.ports.metrics_collector import MetricsCollector
 from webhook_inspector.domain.ports.request_repository import RequestRepository
+from webhook_inspector.domain.services.hmac.base import ValidationResult
+from webhook_inspector.domain.services.hmac.factory import get_validator
+from webhook_inspector.infrastructure.crypto.secrets import decrypt_secret
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +26,7 @@ class CaptureRequest:
     blob_storage: BlobStorage
     inline_threshold: int
     metrics: MetricsCollector
+    secrets_key: bytes  # 32-byte AES-256 key decoded from Settings.secrets_encryption_key
     # notifier dropped — NOTIFY now happens in request_repo.save() transactionally
 
     async def execute(
@@ -41,6 +45,24 @@ class CaptureRequest:
         if endpoint is None:
             raise EndpointNotFoundError(token)
 
+        # Always set signature_status — NEVER leave it None. PR2's aggregation
+        # (list_integrations) does GROUP BY signature_status; NULL rows would
+        # break the integration x signature_status cross-tab.
+        if endpoint.signature_provider and endpoint.signature_secret_encrypted:
+            validator = get_validator(endpoint.signature_provider)
+            if validator is not None:
+                secret = decrypt_secret(self.secrets_key, endpoint.signature_secret_encrypted)
+                result = validator.validate(body=body, headers=headers, secret=secret)
+                signature_status = result.value
+            else:
+                logger.warning(
+                    "unknown_signature_provider",
+                    extra={"provider": endpoint.signature_provider},
+                )
+                signature_status = ValidationResult.NO_PROVIDER.value
+        else:
+            signature_status = ValidationResult.NO_PROVIDER.value
+
         captured = CapturedRequest.create(
             endpoint_id=endpoint.id,
             method=method.upper(),
@@ -50,6 +72,7 @@ class CaptureRequest:
             body=body,
             source_ip=source_ip,
             inline_threshold_bytes=self.inline_threshold,
+            signature_status=signature_status,
         )
 
         if captured.blob_key is not None:
