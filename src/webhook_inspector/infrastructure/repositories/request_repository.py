@@ -14,6 +14,9 @@ class PostgresRequestRepository(RequestRepository):
         self._session = session
 
     async def save(self, request: CapturedRequest) -> None:
+        # Every field on CapturedRequest must appear below. test_postgres_save_fields
+        # guards the omission, but silent drops have shipped twice (PR1.4, PR2.3) —
+        # if you add a field, mirror it here AND in _to_entity.
         row = RequestTable(
             id=request.id,
             endpoint_id=request.endpoint_id,
