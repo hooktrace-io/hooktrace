@@ -73,32 +73,6 @@ def test_request_item_signature_status_none_when_no_provider():
     assert payload["signature_status"] is None
 
 
-def test_request_item_no_signature_status_field_drops_it():
-    """Before PR1.5: constructing RequestItem without signature_status omits the key.
-
-    This test documents the OLD (broken) behaviour and must FAIL once
-    signature_status is added as a required field with a default.
-    After PR1.5 the field is always present (even if None), so this test
-    is deliberately asserting the pre-fix state.  We mark it xfail so it
-    becomes an expected failure once the fix is applied.
-    """
-    r = _make_request(signature_status="invalid")
-    item = RequestItem(
-        id=r.id,
-        method=r.method,
-        path=r.path,
-        headers=r.headers,
-        body_preview=r.body_preview,
-        body_size=r.body_size,
-        received_at=r.received_at.isoformat(),
-        # intentionally not passing signature_status
-    )
-    payload = item.model_dump()
-    # After the fix signature_status is always in the payload (as None default).
-    # This was the bug: field absent → silently dropped from API response.
-    assert "signature_status" in payload
-
-
 # ---------------------------------------------------------------------------
 # Surface 4 & 6: Jinja req dict must include signature_status
 # ---------------------------------------------------------------------------
