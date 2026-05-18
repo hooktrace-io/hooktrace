@@ -1,7 +1,7 @@
 import re
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
-from typing import Annotated, cast
+from typing import Annotated, Literal, cast
 from uuid import UUID
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Request
@@ -27,6 +27,7 @@ from webhook_inspector.domain.entities.endpoint import (
     DEFAULT_RESPONSE_STATUS_CODE,
 )
 from webhook_inspector.domain.exceptions import EndpointValidationError, SlugAlreadyTakenError
+from webhook_inspector.domain.services.hmac.base import ValidationResult
 from webhook_inspector.infrastructure.notifications.postgres_notifier import PostgresNotifier
 from webhook_inspector.web.app.deps import (
     _session_factory,
@@ -171,7 +172,15 @@ class RequestItem(BaseModel):
     body_preview: str | None
     body_size: int
     received_at: str
-    signature_status: str | None = None
+    signature_status: (
+        Literal[
+            ValidationResult.VALID,
+            ValidationResult.INVALID,
+            ValidationResult.MISSING,
+            ValidationResult.NO_PROVIDER,
+        ]
+        | None
+    ) = None
 
 
 class RequestList(BaseModel):
