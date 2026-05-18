@@ -45,8 +45,11 @@ async def engine(database_url: str):
     upserts that target those indexes silently fail in tests.
     """
     eng = create_async_engine(database_url, future=True)
-    # Run alembic upgrade head against this test database. Use a sync URL
-    # since alembic operates synchronously.
+    # Run alembic upgrade head against this test database. migrations/env.py
+    # internally calls asyncio.run() which collides with pytest-asyncio's
+    # running loop, so dispatch to a worker thread that has its own loop.
+    import asyncio
+
     from alembic import command
     from alembic.config import Config
 
@@ -55,7 +58,7 @@ async def engine(database_url: str):
     )
     cfg = Config("alembic.ini")
     cfg.set_main_option("sqlalchemy.url", sync_url)
-    command.upgrade(cfg, "head")
+    await asyncio.to_thread(command.upgrade, cfg, "head")
     yield eng
     await eng.dispose()
 
