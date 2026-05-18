@@ -138,11 +138,19 @@ async def capture(
     # Attach trace summary in the same session as the INSERT — commit is atomic.
     current_span = trace.get_current_span()
     trace_id_int = current_span.get_span_context().trace_id
-    if trace_id_int:
-        trace_id_hex = format(trace_id_int, "032x")
-        summary = get_summary_processor().pop_summary(trace_id_hex)
-        if summary:
-            await PostgresRequestRepository(session).update_trace_summary(_captured.id, summary)
+    trace_id_hex = format(trace_id_int, "032x") if trace_id_int else None
+    summary = get_summary_processor().pop_summary(trace_id_hex) if trace_id_hex else []
+    # Diagnostic for prod : log what we pop'd so we can see if trace_id matches.
+    logger.info(
+        "trace_attach",
+        extra={
+            "trace_id": trace_id_hex,
+            "summary_len": len(summary),
+            "buffered_traces": list(get_summary_processor()._buffer.keys())[:5],
+        },
+    )
+    if summary:
+        await PostgresRequestRepository(session).update_trace_summary(_captured.id, summary)
 
     if _captured.detected_integration is not None:
         background_tasks.add_task(
