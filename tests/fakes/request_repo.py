@@ -72,6 +72,12 @@ class FakeRequestRepo(RequestRepository):
                 object.__setattr__(req, "schema_drift", drift)
                 break
 
+    async def update_trace_summary(self, request_id: UUID, summary: list[dict[str, Any]]) -> None:
+        for req in self.saved:
+            if req.id == request_id:
+                object.__setattr__(req, "trace_summary", summary)
+                break
+
     async def aggregate_by_integration(self, endpoint_id: UUID) -> list[IntegrationAggregate]:
         """In-memory aggregation matching the PostgreSQL 3-CTE behaviour."""
         relevant = [
