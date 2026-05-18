@@ -75,6 +75,17 @@ def test_blocks_self_pointing(target: SafeReplayTarget) -> None:
         target.validate("https://hook.hooktrace.io/h/abc")
 
 
+def test_blocks_self_pointing_with_trailing_dot(target: SafeReplayTarget) -> None:
+    """`example.com.` is the same FQDN as `example.com` per DNS rules. A
+    naive suffix check on the raw hostname would let `app.hooktrace.io.`
+    through ; the trailing-dot normalization closes that hole.
+    """
+    with pytest.raises(SsrfBlockedError):
+        target.validate("https://app.hooktrace.io./foo")
+    with pytest.raises(SsrfBlockedError):
+        target.validate("https://HOOKTRACE.IO./bar")
+
+
 # ---------------------------------------------------------------------------
 # Layer (b) — DNS-resolved blocks
 # ---------------------------------------------------------------------------
