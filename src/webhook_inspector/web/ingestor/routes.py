@@ -122,32 +122,31 @@ async def capture(
     if len(body) > settings.max_body_bytes:
         raise HTTPException(status_code=413, detail="payload too large")
 
-    try:
-        _captured, endpoint = await use_case.execute(
-            token=token,
-            method=request.method,
-            path=f"/h/{token}{rest}",
-            query_string=request.url.query or None,
-            headers={k.lower(): v for k, v in request.headers.items()},
-            body=body,
-            source_ip=request.client.host if request.client else "0.0.0.0",
-        )
-    except EndpointNotFoundError as e:
-        raise HTTPException(status_code=404, detail="endpoint not found") from e
+    # Wrap the use case in our own outer span so we have a stable trace_id to
+    # pop the summary against. FastAPIInstrumentor's middleware-created span
+    # is unreliable here — in some configurations `trace.get_current_span()`
+    # returns INVALID_SPAN by the time the route handler runs, leaving us
+    # with no trace_id to look up the buffered business spans.
+    tracer = trace.get_tracer(__name__)
+    with tracer.start_as_current_span("capture_request") as outer:
+        try:
+            _captured, endpoint = await use_case.execute(
+                token=token,
+                method=request.method,
+                path=f"/h/{token}{rest}",
+                query_string=request.url.query or None,
+                headers={k.lower(): v for k, v in request.headers.items()},
+                body=body,
+                source_ip=request.client.host if request.client else "0.0.0.0",
+            )
+        except EndpointNotFoundError as e:
+            raise HTTPException(status_code=404, detail="endpoint not found") from e
+        trace_id_hex = format(outer.get_span_context().trace_id, "032x")
 
-    # Attach trace summary in the same session as the INSERT — commit is atomic.
-    current_span = trace.get_current_span()
-    trace_id_int = current_span.get_span_context().trace_id
-    trace_id_hex = format(trace_id_int, "032x") if trace_id_int else None
-    summary = get_summary_processor().pop_summary(trace_id_hex) if trace_id_hex else []
-    # Diagnostic for prod (raw stdout bypassing structlog).
-    import sys
-
-    sys.stdout.write(
-        f"DIAG_TRACE_ATTACH trace_id={trace_id_hex} summary_len={len(summary)} "
-        f"buffered={list(get_summary_processor()._buffer.keys())[:5]}\n"
-    )
-    sys.stdout.flush()
+    # `capture_request` has ended → its on_end fired → the outer span and all
+    # its children (`capture` + inner business spans) are in the buffer under
+    # the same trace_id. Pop them and persist in the same session as the INSERT.
+    summary = get_summary_processor().pop_summary(trace_id_hex)
     if summary:
         await PostgresRequestRepository(session).update_trace_summary(_captured.id, summary)
 
