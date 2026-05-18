@@ -1,7 +1,8 @@
 from collections.abc import AsyncIterator
+from typing import Any
 from uuid import UUID
 
-from sqlalchemy import func, select, text
+from sqlalchemy import func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from webhook_inspector.domain.entities.captured_request import CapturedRequest
@@ -33,6 +34,7 @@ class PostgresRequestRepository(RequestRepository):
             signature_status=request.signature_status,
             detected_integration=request.detected_integration,
             detected_event_type=request.detected_event_type,
+            schema_drift=request.schema_drift,
         )
         self._session.add(row)
         await self._session.flush()
@@ -109,6 +111,14 @@ class PostgresRequestRepository(RequestRepository):
         result = await self._session.execute(stmt)
         return int(result.scalar() or 0)
 
+    async def update_schema_drift(self, request_id: UUID, drift: dict[str, Any] | None) -> None:
+        stmt = (
+            update(RequestTable)
+            .where(RequestTable.id == request_id)  # type: ignore[arg-type]  # SQLAlchemy/mypy strict incompat
+            .values(schema_drift=drift)
+        )
+        await self._session.execute(stmt)
+
     async def aggregate_by_integration(self, endpoint_id: UUID) -> list[IntegrationAggregate]:
         stmt = text("""
             WITH per_integration AS (
@@ -181,4 +191,5 @@ def _to_entity(row: RequestTable) -> CapturedRequest:
         signature_status=row.signature_status,
         detected_integration=row.detected_integration,
         detected_event_type=row.detected_event_type,
+        schema_drift=row.schema_drift,
     )

@@ -65,6 +65,12 @@ class FakeRequestRepo(RequestRepository):
     async def count_by_endpoint(self, endpoint_id: UUID) -> int:
         return len([r for r in self.saved if r.endpoint_id == endpoint_id])
 
+    async def update_schema_drift(self, request_id: UUID, drift: dict | None) -> None:
+        for req in self.saved:
+            if req.id == request_id:
+                object.__setattr__(req, "schema_drift", drift)
+                break
+
     async def aggregate_by_integration(self, endpoint_id: UUID) -> list[IntegrationAggregate]:
         """In-memory aggregation matching the PostgreSQL 3-CTE behaviour."""
         relevant = [
