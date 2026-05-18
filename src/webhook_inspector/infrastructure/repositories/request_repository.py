@@ -5,6 +5,7 @@ from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from webhook_inspector.domain.entities.captured_request import CapturedRequest
+from webhook_inspector.domain.entities.integration_aggregate import IntegrationAggregate
 from webhook_inspector.domain.ports.request_repository import RequestRepository
 from webhook_inspector.infrastructure.database.models import RequestTable
 
@@ -107,6 +108,10 @@ class PostgresRequestRepository(RequestRepository):
         )
         result = await self._session.execute(stmt)
         return int(result.scalar() or 0)
+
+    async def aggregate_by_integration(self, endpoint_id: UUID) -> list[IntegrationAggregate]:  # noqa: ARG002
+        # Stub — real 3-CTE implementation added in Task 2.
+        return []
 
 
 def _to_entity(row: RequestTable) -> CapturedRequest:

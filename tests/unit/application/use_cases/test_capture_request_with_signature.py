@@ -77,6 +77,9 @@ class FakeRequestRepo(RequestRepository):
     async def count_by_endpoint(self, endpoint_id):
         return len([r for r in self.saved if r.endpoint_id == endpoint_id])
 
+    async def aggregate_by_integration(self, endpoint_id):
+        return []
+
 
 class FakeBlobStorage(BlobStorage):
     def __init__(self):
