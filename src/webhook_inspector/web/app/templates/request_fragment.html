@@ -28,21 +28,4 @@
   <span class="text-{{ int_color }}-300 text-xs">{{ req.detected_event_type }}</span>
   {% endif %}
   {% endif %}
-  {% if req.schema_drift and (req.schema_drift.added or req.schema_drift.changed) %}
-  <span class="text-amber-400 text-xs" title="Schema drift detected">
-    🔔 drift
-  </span>
-  {% endif %}
 </li>
-{% if req.trace_summary %}
-<div class="timeline mt-1 pl-4 text-xs font-mono border-l border-slate-700 ml-4">
-  {% set root_duration = req.trace_summary[0].duration_ms if req.trace_summary else 1 %}
-  {% for span in req.trace_summary %}
-  <div class="flex items-center gap-2 py-0.5" style="padding-left: {{ span.depth * 12 }}px">
-    <span class="text-slate-400 truncate max-w-xs">{{ span.name }}</span>
-    <span class="text-slate-500">{{ span.duration_ms | round(2) }}ms</span>
-    {% if span.status == "ERROR" %}<span class="text-rose-400">&#10007;</span>{% endif %}
-  </div>
-  {% endfor %}
-</div>
-{% endif %}

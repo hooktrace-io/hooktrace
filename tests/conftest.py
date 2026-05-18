@@ -101,31 +101,8 @@ def settings(monkeypatch, database_url):
     return Settings()
 
 
-def _clear_summary_processor_buffer():
-    """Reset the InMemoryRequestSpanProcessor singleton between tests so a
-    trace from one test doesn't bleed into the next. Uses the processor's
-    own shutdown() so the RLock is honored (don't reach into _buffer).
-    """
-    try:
-        from webhook_inspector.observability import tracing
-
-        proc = getattr(tracing, "_summary_processor", None)
-        if proc is not None:
-            proc.shutdown()
-    except (ImportError, AttributeError):
-        pass
-
-
 @pytest.fixture
-async def _reset_summary_processor():
-    """Clear the InMemoryRequestSpanProcessor singleton between tests."""
-    _clear_summary_processor_buffer()
-    yield
-    _clear_summary_processor_buffer()
-
-
-@pytest.fixture
-async def app_client(monkeypatch, database_url, engine, _reset_summary_processor):
+async def app_client(monkeypatch, database_url, engine):
     """httpx client wired to the web FastAPI app. LifespanManager triggers
     the app's lifespan (configure_tracing/metrics/instrument_app). Clears
     the 5 lru_cache factories in web/app/deps.py.
@@ -153,7 +130,7 @@ async def app_client(monkeypatch, database_url, engine, _reset_summary_processor
 
 
 @pytest.fixture
-async def ingestor_client(monkeypatch, database_url, engine, _reset_summary_processor):
+async def ingestor_client(monkeypatch, database_url, engine):
     """Mirror of app_client for the ingestor service. Clears the 6 lru_caches
     in web/ingestor/deps.py (the extra one vs app is _blob_storage).
     """
@@ -169,8 +146,6 @@ async def ingestor_client(monkeypatch, database_url, engine, _reset_summary_proc
         ing_deps.get_metrics,
     ):
         fn.cache_clear()
-    # Reset the schema queue singleton so each test starts with a clean state.
-    ing_deps._schema_queue_singleton = None
     async with LifespanManager(ingestor_app):
         async with httpx.AsyncClient(
             transport=ASGITransport(app=ingestor_app), base_url="http://test"

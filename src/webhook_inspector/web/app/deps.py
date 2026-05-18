@@ -15,7 +15,6 @@ from webhook_inspector.application.use_cases.create_endpoint import CreateEndpoi
 from webhook_inspector.application.use_cases.export_requests import ExportRequests
 from webhook_inspector.application.use_cases.list_integrations import ListIntegrations
 from webhook_inspector.application.use_cases.list_requests import ListRequests
-from webhook_inspector.application.use_cases.list_schemas import ListSchemas
 from webhook_inspector.application.use_cases.replay_request import ReplayRequest
 from webhook_inspector.application.use_cases.update_endpoint_config import UpdateEndpointConfig
 from webhook_inspector.config import Settings
@@ -30,9 +29,6 @@ from webhook_inspector.infrastructure.repositories.replay_repository import (
 )
 from webhook_inspector.infrastructure.repositories.request_repository import (
     PostgresRequestRepository,
-)
-from webhook_inspector.infrastructure.repositories.schema_repository import (
-    PostgresSchemaRepository,
 )
 from webhook_inspector.infrastructure.storage.factory import make_blob_storage
 
@@ -114,15 +110,6 @@ async def get_export_requests(
         request_repo=PostgresRequestRepository(session),
         blob_storage=make_blob_storage(settings),
         max_requests=settings.export_max_requests,
-    )
-
-
-async def get_list_schemas(
-    session: AsyncSession = Depends(get_session),  # noqa: B008
-) -> ListSchemas:
-    return ListSchemas(
-        endpoint_repo=PostgresEndpointRepository(session),
-        schema_repo=PostgresSchemaRepository(session),
     )
 
 
