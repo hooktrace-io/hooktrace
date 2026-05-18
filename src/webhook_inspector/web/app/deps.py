@@ -111,8 +111,14 @@ async def get_update_endpoint_config(
     session: AsyncSession = Depends(get_session),  # noqa: B008
     settings: Settings = Depends(get_settings),  # noqa: B008
 ) -> UpdateEndpointConfig:
-    # Key was validated at startup by lifespan; decode and pass through.
-    key = base64.b64decode(settings.secrets_encryption_key)  # type: ignore[arg-type]
+    # Key was validated at startup by lifespan. When unset (dev mode), pass an
+    # empty sentinel ; the use case will reject signature config writes by
+    # virtue of the secret-encryption call failing on a zero-length key.
+    key = (
+        base64.b64decode(settings.secrets_encryption_key)
+        if settings.secrets_encryption_key
+        else b""
+    )
     return UpdateEndpointConfig(
         endpoint_repo=PostgresEndpointRepository(session),
         secrets_key=key,
