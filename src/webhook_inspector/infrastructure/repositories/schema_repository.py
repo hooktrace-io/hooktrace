@@ -72,6 +72,15 @@ class PostgresSchemaRepository(SchemaRepository):
             },
         )
 
+    async def list_by_endpoint(self, endpoint_id: UUID) -> list[InferredSchema]:
+        stmt = (
+            select(InferredSchemaTable)
+            .where(InferredSchemaTable.endpoint_id == endpoint_id)  # type: ignore[arg-type]  # SQLAlchemy/mypy strict incompat
+            .order_by(InferredSchemaTable.integration, InferredSchemaTable.event_type)  # type: ignore[arg-type]  # SQLAlchemy column descriptors at runtime
+        )
+        rows = (await self._session.execute(stmt)).scalars().all()
+        return [_to_entity(r) for r in rows]
+
     async def acquire_advisory_lock(self, key: int) -> None:
         await self._session.execute(text("SELECT pg_advisory_xact_lock(:k)"), {"k": key})
 
