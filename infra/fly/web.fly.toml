@@ -13,17 +13,20 @@ primary_region = "cdg"
   app = "uvicorn webhook_inspector.web.app.main:app --host 0.0.0.0 --port 8080"
 
 [env]
-  PORT                     = "8080"
-  ENVIRONMENT              = "prod"
-  LOG_LEVEL                = "INFO"
-  SERVICE_NAME             = "webhook-inspector"
-  BLOB_STORAGE_BACKEND     = "s3"
-  S3_REGION                = "auto"
-  CLOUD_TRACE_ENABLED      = "false"
-  CLOUD_METRICS_ENABLED    = "false"
-  OTEL_TRACES_SAMPLER      = "parentbased_traceidratio"
-  OTEL_TRACES_SAMPLER_ARG  = "0.1"
-  TRACE_SAMPLE_RATIO       = "0.1"
+  PORT                 = "8080"
+  ENVIRONMENT          = "prod"
+  LOG_LEVEL            = "INFO"
+  SERVICE_NAME         = "webhook-inspector"
+  BLOB_STORAGE_BACKEND = "s3"
+  S3_REGION            = "auto"
+  # V3 self-contained observability — every span recorded in the in-memory
+  # buffer + ConsoleSpanExporter. The previous parentbased_traceidratio at
+  # 0.1 / 0.05 was overriding our code-level ALWAYS_ON sampler for FastAPI
+  # auto-instrumented root spans, leaving trace_summary null on ~95% of
+  # captures. Belt-and-braces : set the env var explicitly to always_on so
+  # any code path that reads it (auto-instrumentors, SDK auto-config) gets
+  # the same answer as our TracerProvider(sampler=ALWAYS_ON).
+  OTEL_TRACES_SAMPLER  = "always_on"
 
 [http_service]
   internal_port        = 8080
