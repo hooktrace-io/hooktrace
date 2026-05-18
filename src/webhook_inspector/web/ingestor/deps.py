@@ -15,7 +15,6 @@ from webhook_inspector.application.use_cases.capture_request import CaptureReque
 from webhook_inspector.config import Settings
 from webhook_inspector.domain.ports.blob_storage import BlobStorage
 from webhook_inspector.domain.ports.metrics_collector import MetricsCollector
-from webhook_inspector.domain.ports.schema_queue import SchemaQueue
 from webhook_inspector.infrastructure.repositories.endpoint_repository import (
     PostgresEndpointRepository,
 )
@@ -71,24 +70,6 @@ async def get_session() -> AsyncIterator[AsyncSession]:
         except Exception:
             await s.rollback()
             raise
-
-
-# Module-level schema queue — set by the lifespan async context manager
-# (main.py). None until set; NullSchemaQueue is used as fallback when Redis
-# is not configured (local dev). This follows the same lazy-init pattern
-# as the DB engine above, but requires async setup (arq.create_pool).
-_schema_queue_singleton: SchemaQueue | None = None
-
-
-def get_schema_queue() -> SchemaQueue:
-    """Return the module-level schema queue.
-    Returns NullSchemaQueue if not yet initialised (dev without Redis).
-    """
-    if _schema_queue_singleton is not None:
-        return _schema_queue_singleton
-    from webhook_inspector.infrastructure.queue.null_schema_queue import NullSchemaQueue
-
-    return NullSchemaQueue()
 
 
 async def get_capture_request(

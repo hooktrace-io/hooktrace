@@ -129,35 +129,3 @@ def test_captured_request_integration_fields_default_to_none():
 
     assert req.detected_integration is None
     assert req.detected_event_type is None
-
-
-def test_captured_request_create_accepts_schema_drift():
-    drift = {"new_fields": ["amount_details"], "removed_fields": []}
-    req = CapturedRequest.create(
-        endpoint_id=uuid4(),
-        method="POST",
-        path="/h/abc",
-        query_string=None,
-        headers={},
-        body=b"{}",
-        source_ip="192.0.2.1",
-        inline_threshold_bytes=8192,
-        schema_drift=drift,
-    )
-
-    assert req.schema_drift == drift
-
-
-def test_captured_request_schema_drift_defaults_to_none():
-    req = CapturedRequest.create(
-        endpoint_id=uuid4(),
-        method="POST",
-        path="/h/abc",
-        query_string=None,
-        headers={},
-        body=b"{}",
-        source_ip="192.0.2.1",
-        inline_threshold_bytes=8192,
-    )
-
-    assert req.schema_drift is None

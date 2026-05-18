@@ -1,6 +1,5 @@
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator
-from typing import Any
 from uuid import UUID
 
 from webhook_inspector.domain.entities.captured_request import CapturedRequest
@@ -41,11 +40,3 @@ class RequestRepository(ABC):
     async def aggregate_by_integration(self, endpoint_id: UUID) -> list[IntegrationAggregate]:
         """Return per-integration request aggregates for the endpoint."""
         ...
-
-    @abstractmethod
-    async def update_schema_drift(self, request_id: UUID, drift: dict[str, Any] | None) -> None: ...
-
-    @abstractmethod
-    async def update_trace_summary(
-        self, request_id: UUID, summary: list[dict[str, Any]]
-    ) -> None: ...

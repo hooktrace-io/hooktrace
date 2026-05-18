@@ -39,14 +39,6 @@ class OtelMetricsCollector(MetricsCollector):
             "webhook_inspector.cleaner.runs.completed",
             description="Cleaner job runs completed successfully.",
         )
-        self._schema_inference = meter.create_counter(
-            "webhook_inspector.schema.inference",
-            description="Schema inference outcomes, labelled by status.",
-        )
-        self._schema_enqueue_failed = meter.create_counter(
-            "webhook_inspector.schema.enqueue_failed",
-            description="Schema inference enqueue failures (Redis down).",
-        )
         self._replay_attempt = meter.create_counter(
             "webhook_inspector.replay.attempt_total",
             description="Replay attempt outcomes, labelled by status.",
@@ -80,12 +72,6 @@ class OtelMetricsCollector(MetricsCollector):
         self._cleaner_runs.add(1)
         if deleted > 0:
             self._cleaner_deletions.add(deleted)
-
-    def schema_inference(self, *, status: str) -> None:
-        self._schema_inference.add(1, {"status": status})
-
-    def schema_enqueue_failed(self) -> None:
-        self._schema_enqueue_failed.add(1)
 
     def replay_attempt(self, *, status: str) -> None:
         self._replay_attempt.add(1, {"status": status})

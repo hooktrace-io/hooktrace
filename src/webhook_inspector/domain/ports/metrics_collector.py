@@ -21,16 +21,6 @@ class MetricsCollector(ABC):
     def cleaner_run(self, deleted: int) -> None: ...
 
     @abstractmethod
-    def schema_inference(self, *, status: str) -> None:
-        """Increment schema_inference_total{status}.
-        status values: updated | no_drift | skipped_no_integration | skipped_non_json
-        """
-
-    @abstractmethod
-    def schema_enqueue_failed(self) -> None:
-        """Increment schema_enqueue_failed_total. Emitted when Redis is down."""
-
-    @abstractmethod
     def replay_attempt(self, *, status: str) -> None:
         """Increment replay_attempt_total{status}.
         status values: success | target_error | network_error | ssrf_blocked |

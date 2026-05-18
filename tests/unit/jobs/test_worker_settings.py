@@ -23,9 +23,10 @@ def test_worker_settings_importable_without_database_url(monkeypatch):
 
     importlib.reload(worker_mod)
 
-    # functions is a list; update_inferred_schema must be in it.
+    # functions is a list; empty for now — PR7 will populate it with the
+    # forward job.
     assert isinstance(worker_mod.WorkerSettings.functions, list)
-    assert worker_mod.update_inferred_schema in worker_mod.WorkerSettings.functions
+    assert worker_mod.WorkerSettings.functions == []
     assert worker_mod.WorkerSettings.max_tries == 2
     assert worker_mod.WorkerSettings.job_timeout == 120
     assert worker_mod.WorkerSettings.max_jobs == 10
