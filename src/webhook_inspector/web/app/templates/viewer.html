@@ -17,11 +17,17 @@
         <code class="bg-slate-800 px-2 py-1 rounded">{{ hook_url }}</code>
       </p>
     </div>
-    <a class="export-button shrink-0 bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-mono px-3 py-2 rounded"
-       href="/api/endpoints/{{ token }}/export.json"
-       download>
-      Export JSON
-    </a>
+    <div class="flex items-center gap-2 shrink-0">
+      <a class="bg-slate-700 hover:bg-slate-600 text-slate-100 text-sm font-mono px-3 py-2 rounded"
+         href="/{{ token }}/integrations">
+        Integrations
+      </a>
+      <a class="export-button bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-mono px-3 py-2 rounded"
+         href="/api/endpoints/{{ token }}/export.json"
+         download>
+        Export JSON
+      </a>
+    </div>
   </header>
 
   <main class="px-6 py-4">

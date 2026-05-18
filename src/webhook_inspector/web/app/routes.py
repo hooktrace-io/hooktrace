@@ -399,6 +399,28 @@ async def landing(request: Request) -> HTMLResponse:
     )
 
 
+@router.get("/{token}/integrations", response_class=HTMLResponse)
+async def integrations_view(
+    token: str,
+    request: Request,
+    use_case: ListIntegrations = Depends(get_list_integrations),  # noqa: B008
+) -> HTMLResponse:
+    try:
+        aggregates = await use_case.execute_for_token(token)
+    except EndpointNotFoundError as e:
+        raise HTTPException(status_code=404, detail="endpoint not found") from e
+
+    templates = request.app.state.templates
+    return cast(
+        HTMLResponse,
+        templates.TemplateResponse(
+            request=request,
+            name="integrations.html",
+            context={"token": token, "aggregates": aggregates},
+        ),
+    )
+
+
 @router.get("/{token}", response_class=HTMLResponse)
 async def viewer(
     token: str,
