@@ -109,9 +109,60 @@ class PostgresRequestRepository(RequestRepository):
         result = await self._session.execute(stmt)
         return int(result.scalar() or 0)
 
-    async def aggregate_by_integration(self, endpoint_id: UUID) -> list[IntegrationAggregate]:  # noqa: ARG002
-        # Stub — real 3-CTE implementation added in Task 2.
-        return []
+    async def aggregate_by_integration(self, endpoint_id: UUID) -> list[IntegrationAggregate]:
+        stmt = text("""
+            WITH per_integration AS (
+                SELECT detected_integration AS integration, COUNT(*) AS total
+                FROM requests
+                WHERE endpoint_id = :endpoint_id
+                  AND detected_integration IS NOT NULL
+                GROUP BY detected_integration
+            ),
+            per_event AS (
+                SELECT detected_integration AS integration,
+                       detected_event_type AS event_type,
+                       COUNT(*) AS count
+                FROM requests
+                WHERE endpoint_id = :endpoint_id
+                  AND detected_integration IS NOT NULL
+                  AND detected_event_type IS NOT NULL
+                GROUP BY detected_integration, detected_event_type
+            ),
+            per_status AS (
+                SELECT detected_integration AS integration,
+                       signature_status,
+                       COUNT(*) AS count
+                FROM requests
+                WHERE endpoint_id = :endpoint_id
+                  AND detected_integration IS NOT NULL
+                GROUP BY detected_integration, signature_status
+            )
+            SELECT
+                pi.integration,
+                pi.total,
+                (
+                    SELECT json_object_agg(pe.event_type, pe.count)
+                    FROM per_event pe
+                    WHERE pe.integration = pi.integration
+                ) AS event_types,
+                (
+                    SELECT json_object_agg(ps.signature_status, ps.count)
+                    FROM per_status ps
+                    WHERE ps.integration = pi.integration
+                ) AS signature_status_counts
+            FROM per_integration pi
+            ORDER BY pi.total DESC
+        """)
+        rows = (await self._session.execute(stmt, {"endpoint_id": endpoint_id})).all()
+        return [
+            IntegrationAggregate(
+                integration=row.integration,
+                total=row.total,
+                event_types=row.event_types or {},
+                signature_status_counts=row.signature_status_counts or {},
+            )
+            for row in rows
+        ]
 
 
 def _to_entity(row: RequestTable) -> CapturedRequest:
