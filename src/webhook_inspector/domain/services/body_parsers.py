@@ -5,6 +5,10 @@ defensive: they return empty / None on any failure, never raise.
 import json
 from urllib.parse import parse_qs
 
+# Mirrors config.py:Settings.body_inline_threshold_bytes — bodies above the
+# inline threshold are offloaded to R2 and aren't worth parsing for detection.
+# Keep the two in sync ; domain layer can't import Settings without breaking
+# clean architecture, so the coupling stays manual.
 _PARSE_CAP_BYTES = 8 * 1024
 
 
