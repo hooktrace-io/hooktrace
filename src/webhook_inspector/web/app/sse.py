@@ -67,6 +67,7 @@ async def stream_for_token(
                     "received_at": req.received_at.isoformat(),
                     "headers": req.headers,
                     "body_preview": req.body_preview,
+                    "signature_status": req.signature_status,
                 },
                 hook_url=hook_url,
             )

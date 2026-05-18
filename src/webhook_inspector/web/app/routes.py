@@ -171,6 +171,7 @@ class RequestItem(BaseModel):
     body_preview: str | None
     body_size: int
     received_at: str
+    signature_status: str | None = None
 
 
 class RequestList(BaseModel):
@@ -217,6 +218,7 @@ async def list_requests(
                 body_preview=r.body_preview,
                 body_size=r.body_size,
                 received_at=r.received_at.isoformat(),
+                signature_status=r.signature_status,
             )
             for r in items
         ],
@@ -254,6 +256,7 @@ async def list_requests_fragment(
                 "received_at": r.received_at.isoformat(),
                 "headers": r.headers,
                 "body_preview": r.body_preview,
+                "signature_status": r.signature_status,
             },
             hook_url=hook_url,
         )
@@ -354,6 +357,7 @@ async def viewer(
                         "received_at": r.received_at.isoformat(),
                         "headers": r.headers,
                         "body_preview": r.body_preview,
+                        "signature_status": r.signature_status,
                     }
                     for r in initial
                 ],
