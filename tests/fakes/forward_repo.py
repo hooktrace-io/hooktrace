@@ -1,9 +1,9 @@
 from dataclasses import replace
-from datetime import datetime
-from typing import Literal
+from datetime import datetime, timedelta
+from typing import Literal, get_args
 from uuid import UUID
 
-from webhook_inspector.domain.entities.forward import Forward
+from webhook_inspector.domain.entities.forward import MAX_ATTEMPTS, Forward, ForwardStatus
 from webhook_inspector.domain.ports.forward_repository import ForwardRepository
 
 
@@ -69,3 +69,125 @@ class FakeForwardRepository(ForwardRepository):
                 forward_completed_at=completed_at,
             )
         )
+
+    async def list_by_endpoint(
+        self,
+        endpoint_id: UUID,
+        *,
+        statuses: list[ForwardStatus] | None = None,
+        limit: int = 50,
+        before_id: UUID | None = None,
+    ) -> list[Forward]:
+        # Build the latest-state view across save+update by collapsing on id.
+        latest: dict[UUID, Forward] = {}
+        for f in self.saved:
+            latest[f.id] = f
+        for f in self.updated:
+            latest[f.id] = f
+
+        rows = [f for f in latest.values() if f.endpoint_id == endpoint_id]
+        if statuses:
+            rows = [f for f in rows if f.status in statuses]
+
+        # Sort: created_at DESC, id DESC for a stable cursor.
+        rows.sort(key=lambda f: (f.created_at, f.id), reverse=True)
+
+        if before_id is not None:
+            cursor = latest.get(before_id)
+            if cursor is not None:
+                rows = [f for f in rows if (f.created_at, f.id) < (cursor.created_at, cursor.id)]
+
+        return rows[:limit]
+
+    async def count_by_status(self, endpoint_id: UUID) -> dict[ForwardStatus, int]:
+        # Same latest-state view as list_by_endpoint.
+        latest: dict[UUID, Forward] = {}
+        for f in self.saved:
+            latest[f.id] = f
+        for f in self.updated:
+            latest[f.id] = f
+
+        counts: dict[ForwardStatus, int] = dict.fromkeys(get_args(ForwardStatus), 0)
+        for f in latest.values():
+            if f.endpoint_id == endpoint_id:
+                counts[f.status] += 1
+        return counts
+
+    async def claim_for_manual_retry(
+        self,
+        forward_id: UUID,
+        endpoint_id: UUID,
+        *,
+        now: datetime,
+    ) -> Forward | None:
+        current = await self.find_by_id(forward_id)
+        if current is None:
+            return None
+        if current.endpoint_id != endpoint_id:
+            return None
+        if current.status not in ("failed", "dead", "abandoned"):
+            return None
+
+        if current.status in ("dead", "abandoned"):
+            new_attempt_count = max(0, MAX_ATTEMPTS - 1)
+        else:
+            new_attempt_count = current.attempt_count
+
+        claimed = replace(
+            current,
+            status="pending",
+            attempt_count=new_attempt_count,
+            manual_retry_at=now,
+            next_attempt_at=now,
+            final_error=None,
+            final_status_code=None,
+            forward_completed_at=None,
+        )
+        self.updated.append(claimed)
+        return claimed
+
+    async def abandon(
+        self,
+        forward_id: UUID,
+        endpoint_id: UUID,
+        *,
+        now: datetime,
+    ) -> Forward | None:
+        current = await self.find_by_id(forward_id)
+        if current is None:
+            return None
+        if current.endpoint_id != endpoint_id:
+            return None
+        if current.status in ("succeeded", "dead", "abandoned"):
+            return None
+
+        abandoned = replace(
+            current,
+            status="abandoned",
+            forward_completed_at=now,
+            final_error="manually abandoned by owner",
+        )
+        self.updated.append(abandoned)
+        return abandoned
+
+    async def redrive_stuck_pending(
+        self,
+        endpoint_id: UUID,
+        *,
+        stuck_threshold_seconds: int,
+        now: datetime,
+    ) -> list[UUID]:
+        threshold = now - timedelta(seconds=stuck_threshold_seconds)
+        latest: dict[UUID, Forward] = {}
+        for f in self.saved:
+            latest[f.id] = f
+        for f in self.updated:
+            latest[f.id] = f
+
+        stuck = [
+            f
+            for f in latest.values()
+            if f.endpoint_id == endpoint_id and f.status == "pending" and f.created_at < threshold
+        ]
+        stuck.sort(key=lambda f: f.created_at)
+        return [f.id for f in stuck]

@@ -1,11 +1,11 @@
-from datetime import datetime
-from typing import Literal
+from datetime import datetime, timedelta
+from typing import Literal, get_args
 from uuid import UUID
 
-from sqlalchemy import select, update
+from sqlalchemy import case, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from webhook_inspector.domain.entities.forward import Forward
+from webhook_inspector.domain.entities.forward import MAX_ATTEMPTS, Forward, ForwardStatus
 from webhook_inspector.domain.ports.forward_repository import ForwardRepository
 from webhook_inspector.infrastructure.database.models import ForwardTable
 
@@ -112,6 +112,142 @@ class PostgresForwardRepository(ForwardRepository):
             )
         )
         await self._session.execute(stmt)
+
+    async def list_by_endpoint(
+        self,
+        endpoint_id: UUID,
+        *,
+        statuses: list[ForwardStatus] | None = None,
+        limit: int = 50,
+        before_id: UUID | None = None,
+    ) -> list[Forward]:
+        stmt = (
+            select(ForwardTable)
+            .where(ForwardTable.endpoint_id == endpoint_id)  # type: ignore[arg-type]
+            .order_by(ForwardTable.created_at.desc(), ForwardTable.id.desc())  # type: ignore[attr-defined]
+            .limit(limit)
+        )
+
+        if statuses:
+            stmt = stmt.where(ForwardTable.status.in_(statuses))  # type: ignore[attr-defined]
+
+        if before_id is not None:
+            cursor_row = (
+                await self._session.execute(
+                    select(ForwardTable.created_at, ForwardTable.id).where(  # type: ignore[call-overload]
+                        ForwardTable.id == before_id
+                    )
+                )
+            ).one_or_none()
+            if cursor_row is not None:
+                cursor_ts, cursor_id = cursor_row
+                stmt = stmt.where(
+                    (ForwardTable.created_at < cursor_ts)
+                    | ((ForwardTable.created_at == cursor_ts) & (ForwardTable.id < cursor_id))
+                )
+
+        rows = (await self._session.execute(stmt)).scalars().all()
+        return [_to_entity(r) for r in rows]
+
+    async def count_by_status(self, endpoint_id: UUID) -> dict[ForwardStatus, int]:
+        stmt = (
+            select(ForwardTable.status, func.count(ForwardTable.id))  # type: ignore[call-overload,arg-type]
+            .where(ForwardTable.endpoint_id == endpoint_id)
+            .group_by(ForwardTable.status)
+        )
+        rows = (await self._session.execute(stmt)).all()
+        # Pre-populate every status with 0 so callers always get all 6 keys.
+        result: dict[ForwardStatus, int] = dict.fromkeys(get_args(ForwardStatus), 0)
+        for status, count in rows:
+            # status comes back as the raw TEXT value from Postgres ; the CHECK
+            # constraint guarantees it's a member of ForwardStatus.
+            result[status] = int(count)
+        return result
+
+    async def claim_for_manual_retry(
+        self,
+        forward_id: UUID,
+        endpoint_id: UUID,
+        *,
+        now: datetime,
+    ) -> Forward | None:
+        # attempt_count: if status was 'dead' or 'abandoned', drop back to
+        # MAX_ATTEMPTS - 1 (give one more shot, not unbounded retries).
+        # If was 'failed', leave attempt_count alone (the normal retry path
+        # would have incremented it for us).
+        new_attempt_count = case(
+            (
+                ForwardTable.status.in_(("dead", "abandoned")),  # type: ignore[attr-defined]
+                max(0, MAX_ATTEMPTS - 1),
+            ),
+            else_=ForwardTable.attempt_count,
+        )
+        stmt = (
+            update(ForwardTable)
+            .where(
+                ForwardTable.id == forward_id,  # type: ignore[arg-type]
+                ForwardTable.endpoint_id == endpoint_id,  # type: ignore[arg-type]
+                ForwardTable.status.in_(("failed", "dead", "abandoned")),  # type: ignore[attr-defined]
+            )
+            .values(
+                status="pending",
+                attempt_count=new_attempt_count,
+                manual_retry_at=now,
+                next_attempt_at=now,
+                final_error=None,
+                final_status_code=None,
+                forward_completed_at=None,
+            )
+            .returning(ForwardTable)
+        )
+        result = await self._session.execute(stmt)
+        row = result.scalar_one_or_none()
+        return _to_entity(row) if row is not None else None
+
+    async def abandon(
+        self,
+        forward_id: UUID,
+        endpoint_id: UUID,
+        *,
+        now: datetime,
+    ) -> Forward | None:
+        stmt = (
+            update(ForwardTable)
+            .where(
+                ForwardTable.id == forward_id,  # type: ignore[arg-type]
+                ForwardTable.endpoint_id == endpoint_id,  # type: ignore[arg-type]
+                ForwardTable.status.notin_(("succeeded", "dead", "abandoned")),  # type: ignore[attr-defined]
+            )
+            .values(
+                status="abandoned",
+                forward_completed_at=now,
+                final_error="manually abandoned by owner",
+            )
+            .returning(ForwardTable)
+        )
+        result = await self._session.execute(stmt)
+        row = result.scalar_one_or_none()
+        return _to_entity(row) if row is not None else None
+
+    async def redrive_stuck_pending(
+        self,
+        endpoint_id: UUID,
+        *,
+        stuck_threshold_seconds: int,
+        now: datetime,
+    ) -> list[UUID]:
+        threshold = now - timedelta(seconds=stuck_threshold_seconds)
+        stmt = (
+            select(ForwardTable.id)  # type: ignore[call-overload]
+            .where(
+                ForwardTable.endpoint_id == endpoint_id,
+                ForwardTable.status == "pending",
+                ForwardTable.created_at < threshold,
+            )
+            .order_by(ForwardTable.created_at.asc())  # type: ignore[attr-defined]
+        )
+        rows = (await self._session.execute(stmt)).scalars().all()
+        return list(rows)
 
 
 def _to_entity(row: ForwardTable) -> Forward:
