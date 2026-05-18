@@ -5,7 +5,7 @@ from enum import StrEnum
 class ValidationResult(StrEnum):
     """Canonical enum for requests.signature_status. CaptureRequest must
     always write one of these values (never NULL) so aggregation queries
-    GROUP BY signature_status produce a complete histogram in PR2.
+    GROUP BY signature_status produce a complete histogram.
     """
 
     VALID = "valid"  # HMAC matches the captured body
@@ -14,7 +14,7 @@ class ValidationResult(StrEnum):
     NO_PROVIDER = "no_provider"  # endpoint has no signature_provider configured
 
 
-# Sync with PR2's CHECK constraint (if we add one) and the test fixtures.
+# Sync with any future DB CHECK constraint and the test fixtures.
 SIGNATURE_STATUS_VALUES = frozenset(v.value for v in ValidationResult)
 
 
