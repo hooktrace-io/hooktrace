@@ -13,6 +13,10 @@ class PostgresForwardRepository(ForwardRepository):
         self._session = session
 
     async def save(self, forward: Forward) -> None:
+        # Every field on Forward must appear below AND in _to_entity. Silent
+        # drops shipped twice in earlier PRs (PR1.4 signature_status,
+        # PR2.3 detected_integration) before the regression test caught them.
+        # If you add a field, mirror it here AND in _to_entity.
         row = ForwardTable(
             id=forward.id,
             request_id=forward.request_id,
