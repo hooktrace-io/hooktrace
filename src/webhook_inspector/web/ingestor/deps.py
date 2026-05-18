@@ -1,3 +1,4 @@
+import base64
 from collections.abc import AsyncIterator
 from functools import lru_cache
 
@@ -75,10 +76,18 @@ async def get_capture_request(
     session: AsyncSession = Depends(get_session),  # noqa: B008
     settings: Settings = Depends(get_settings),  # noqa: B008
 ) -> CaptureRequest:
+    key = (
+        base64.b64decode(settings.secrets_encryption_key)
+        if settings.secrets_encryption_key
+        else b""
+    )
+    if len(key) != 32:
+        raise RuntimeError("SECRETS_ENCRYPTION_KEY must be set (32 bytes base64)")
     return CaptureRequest(
         endpoint_repo=PostgresEndpointRepository(session),
         request_repo=PostgresRequestRepository(session),
         blob_storage=_blob_storage(),
         inline_threshold=settings.body_inline_threshold_bytes,
         metrics=get_metrics(),
+        secrets_key=key,  # NEW
     )

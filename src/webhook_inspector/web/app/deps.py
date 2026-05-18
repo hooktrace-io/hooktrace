@@ -1,3 +1,4 @@
+import base64
 from collections.abc import AsyncIterator
 from functools import lru_cache
 
@@ -13,6 +14,7 @@ from sqlalchemy.ext.asyncio import (
 from webhook_inspector.application.use_cases.create_endpoint import CreateEndpoint
 from webhook_inspector.application.use_cases.export_requests import ExportRequests
 from webhook_inspector.application.use_cases.list_requests import ListRequests
+from webhook_inspector.application.use_cases.update_endpoint_config import UpdateEndpointConfig
 from webhook_inspector.config import Settings
 from webhook_inspector.domain.ports.metrics_collector import MetricsCollector
 from webhook_inspector.infrastructure.notifications.postgres_notifier import PostgresNotifier
@@ -102,4 +104,21 @@ async def get_export_requests(
         request_repo=PostgresRequestRepository(session),
         blob_storage=make_blob_storage(settings),
         max_requests=settings.export_max_requests,
+    )
+
+
+async def get_update_endpoint_config(
+    session: AsyncSession = Depends(get_session),  # noqa: B008
+    settings: Settings = Depends(get_settings),  # noqa: B008
+) -> UpdateEndpointConfig:
+    key = (
+        base64.b64decode(settings.secrets_encryption_key)
+        if settings.secrets_encryption_key
+        else b""
+    )
+    if len(key) != 32:
+        raise RuntimeError("SECRETS_ENCRYPTION_KEY must be set (32 bytes base64)")
+    return UpdateEndpointConfig(
+        endpoint_repo=PostgresEndpointRepository(session),
+        secrets_key=key,
     )

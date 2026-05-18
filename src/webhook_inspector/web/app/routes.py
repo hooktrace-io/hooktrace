@@ -19,6 +19,7 @@ from webhook_inspector.application.use_cases.list_requests import (
     EndpointNotFoundError,
     ListRequests,
 )
+from webhook_inspector.application.use_cases.update_endpoint_config import UpdateEndpointConfig
 from webhook_inspector.domain.entities.captured_request import CapturedRequest
 from webhook_inspector.domain.entities.endpoint import (
     DEFAULT_RESPONSE_BODY,
@@ -34,7 +35,9 @@ from webhook_inspector.web.app.deps import (
     get_list_requests,
     get_notifier,
     get_session,
+    get_update_endpoint_config,
 )
+from webhook_inspector.web.app.schemas.endpoint_config import EndpointConfigPatch
 from webhook_inspector.web.app.sse import stream_for_token
 
 router = APIRouter()
@@ -142,6 +145,22 @@ async def create_endpoint(
             delay_ms=endpoint.response_delay_ms,
         ),
     )
+
+
+@router.patch("/api/endpoints/{token}/config", status_code=204)
+async def update_config(
+    token: str,
+    body: EndpointConfigPatch,
+    use_case: UpdateEndpointConfig = Depends(get_update_endpoint_config),  # noqa: B008
+) -> None:
+    try:
+        await use_case.execute(
+            token=token,
+            signature_provider=body.signature.provider if body.signature else None,
+            signature_secret=body.signature.secret if body.signature else None,
+        )
+    except EndpointNotFoundError as e:
+        raise HTTPException(status_code=404, detail="endpoint not found") from e
 
 
 class RequestItem(BaseModel):
