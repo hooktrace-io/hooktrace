@@ -4,26 +4,39 @@ from datetime import UTC, datetime
 from typing import Annotated, Literal, cast
 from uuid import UUID
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Request
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field, HttpUrl
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from webhook_inspector.application.use_cases.abandon_forward import (
+    AbandonForward,
+    ForwardNotFoundError,
+)
 from webhook_inspector.application.use_cases.create_endpoint import CreateEndpoint
 from webhook_inspector.application.use_cases.export_requests import (
     ExportRequests,
     ExportTooLargeError,
 )
+from webhook_inspector.application.use_cases.get_forward_stats import GetForwardStats
+from webhook_inspector.application.use_cases.list_forwards import ListForwards
 from webhook_inspector.application.use_cases.list_integrations import ListIntegrations
 from webhook_inspector.application.use_cases.list_requests import (
     EndpointNotFoundError,
     ListRequests,
 )
+from webhook_inspector.application.use_cases.redrive_pending_forwards import (
+    RedrivePendingForwards,
+)
 from webhook_inspector.application.use_cases.replay_request import (
     ReplayPayloadTooLargeError,
     ReplayRequest,
     RequestNotFoundError,
+)
+from webhook_inspector.application.use_cases.retry_forward import (
+    ForwardNotRetryableError,
+    RetryForward,
 )
 from webhook_inspector.application.use_cases.update_endpoint_config import UpdateEndpointConfig
 from webhook_inspector.domain.entities.captured_request import CapturedRequest
@@ -32,17 +45,23 @@ from webhook_inspector.domain.entities.endpoint import (
     DEFAULT_RESPONSE_DELAY_MS,
     DEFAULT_RESPONSE_STATUS_CODE,
 )
+from webhook_inspector.domain.entities.forward import Forward
 from webhook_inspector.domain.exceptions import EndpointValidationError, SlugAlreadyTakenError
 from webhook_inspector.domain.services.hmac.base import ValidationResult
 from webhook_inspector.infrastructure.notifications.postgres_notifier import PostgresNotifier
 from webhook_inspector.web.app.deps import (
     _session_factory,
+    get_abandon_forward,
     get_create_endpoint,
     get_export_requests,
+    get_forward_stats_use_case,
+    get_list_forwards,
     get_list_integrations,
     get_list_requests,
     get_notifier,
+    get_redrive_pending_forwards,
     get_replay_request,
+    get_retry_forward,
     get_session,
     get_update_endpoint_config,
 )
@@ -254,6 +273,50 @@ class RequestList(BaseModel):
     next_before_id: UUID | None
 
 
+class ForwardItem(BaseModel):
+    id: UUID
+    request_id: UUID
+    target_url: str
+    status: str
+    attempt_count: int
+    last_attempt_at: str | None
+    next_attempt_at: str | None
+    final_status_code: int | None
+    final_error: str | None
+    manual_retry_at: str | None
+    created_at: str
+
+
+class ForwardList(BaseModel):
+    items: list[ForwardItem]
+    next_before_id: UUID | None
+
+
+class ForwardStatsResponse(BaseModel):
+    pending: int = 0
+    in_flight: int = 0
+    succeeded: int = 0
+    failed: int = 0
+    dead: int = 0
+    abandoned: int = 0
+
+
+def _to_forward_item(forward: Forward) -> ForwardItem:
+    return ForwardItem(
+        id=forward.id,
+        request_id=forward.request_id,
+        target_url=forward.target_url,
+        status=forward.status,
+        attempt_count=forward.attempt_count,
+        last_attempt_at=(forward.last_attempt_at.isoformat() if forward.last_attempt_at else None),
+        next_attempt_at=(forward.next_attempt_at.isoformat() if forward.next_attempt_at else None),
+        final_status_code=forward.final_status_code,
+        final_error=forward.final_error,
+        manual_retry_at=(forward.manual_retry_at.isoformat() if forward.manual_retry_at else None),
+        created_at=forward.created_at.isoformat(),
+    )
+
+
 async def _fetch_requests_or_raise(
     *,
     token: str,
@@ -396,6 +459,93 @@ async def replay_request_route(
     )
 
 
+@router.get("/api/endpoints/{token}/forwards", response_model=ForwardList)
+async def list_forwards_route(
+    token: str,
+    status: Annotated[list[str] | None, Query()] = None,
+    limit: int = 50,
+    before_id: UUID | None = None,
+    use_case: ListForwards = Depends(get_list_forwards),  # noqa: B008
+) -> ForwardList:
+    if not 1 <= limit <= 200:
+        raise HTTPException(status_code=400, detail="limit must be in [1, 200]")
+    try:
+        forwards = await use_case.execute(
+            token=token, statuses=status, limit=limit, before_id=before_id
+        )
+    except EndpointNotFoundError as e:
+        raise HTTPException(status_code=404, detail="endpoint not found") from e
+
+    items = [_to_forward_item(f) for f in forwards]
+    return ForwardList(
+        items=items,
+        next_before_id=items[-1].id if len(items) == limit else None,
+    )
+
+
+@router.get("/api/endpoints/{token}/forwards/stats", response_model=ForwardStatsResponse)
+async def get_forward_stats_route(
+    token: str,
+    use_case: GetForwardStats = Depends(get_forward_stats_use_case),  # noqa: B008
+) -> ForwardStatsResponse:
+    try:
+        counts = await use_case.execute(token=token)
+    except EndpointNotFoundError as e:
+        raise HTTPException(status_code=404, detail="endpoint not found") from e
+    return ForwardStatsResponse(**counts)
+
+
+@router.post(
+    "/api/endpoints/{token}/forwards/{forward_id}/retry",
+    response_model=ForwardItem,
+)
+async def retry_forward_route(
+    token: str,
+    forward_id: UUID,
+    use_case: RetryForward = Depends(get_retry_forward),  # noqa: B008
+) -> ForwardItem:
+    try:
+        forward = await use_case.execute(token=token, forward_id=forward_id)
+    except EndpointNotFoundError as e:
+        raise HTTPException(status_code=404, detail="endpoint not found") from e
+    except ForwardNotRetryableError as e:
+        # 404 (not 403) AND a generic detail string — the same response is
+        # returned for "wrong status" and "cross-endpoint" so the API cannot be
+        # used to probe whether a forward_id exists under a different token.
+        raise HTTPException(status_code=404, detail="forward not retryable") from e
+    return _to_forward_item(forward)
+
+
+@router.post("/api/endpoints/{token}/forwards/redrive")
+async def redrive_forwards_route(
+    token: str,
+    use_case: RedrivePendingForwards = Depends(get_redrive_pending_forwards),  # noqa: B008
+) -> dict[str, int]:
+    try:
+        count = await use_case.execute(token=token)
+    except EndpointNotFoundError as e:
+        raise HTTPException(status_code=404, detail="endpoint not found") from e
+    return {"redriven": count}
+
+
+@router.delete(
+    "/api/endpoints/{token}/forwards/{forward_id}",
+    response_model=ForwardItem,
+)
+async def abandon_forward_route(
+    token: str,
+    forward_id: UUID,
+    use_case: AbandonForward = Depends(get_abandon_forward),  # noqa: B008
+) -> ForwardItem:
+    try:
+        forward = await use_case.execute(token=token, forward_id=forward_id)
+    except EndpointNotFoundError as e:
+        raise HTTPException(status_code=404, detail="endpoint not found") from e
+    except ForwardNotFoundError as e:
+        raise HTTPException(status_code=404, detail="forward not found") from e
+    return _to_forward_item(forward)
+
+
 @router.get("/api/endpoints/{token}/export.json")
 async def export_endpoint(
     token: str,
@@ -478,6 +628,44 @@ async def integrations_view(
             request=request,
             name="integrations.html",
             context={"token": token, "aggregates": aggregates},
+        ),
+    )
+
+
+@router.get("/{token}/forwards", response_class=HTMLResponse)
+async def forwards_view(
+    token: str,
+    request: Request,
+    status: Annotated[list[str] | None, Query()] = None,
+    list_use_case: ListForwards = Depends(get_list_forwards),  # noqa: B008
+    stats_use_case: GetForwardStats = Depends(get_forward_stats_use_case),  # noqa: B008
+) -> HTMLResponse:
+    # Default filter when no ?status param: show actionable rows only
+    # (pending / in_flight / failed / dead) — succeeded + abandoned are hidden.
+    effective_statuses = status if status else ["pending", "in_flight", "failed", "dead"]
+    try:
+        forwards = await list_use_case.execute(
+            token=token,
+            statuses=effective_statuses,
+            limit=50,
+            before_id=None,
+        )
+        stats = await stats_use_case.execute(token=token)
+    except EndpointNotFoundError as e:
+        raise HTTPException(status_code=404, detail="endpoint not found") from e
+
+    templates = request.app.state.templates
+    return cast(
+        HTMLResponse,
+        templates.TemplateResponse(
+            request=request,
+            name="forwards.html",
+            context={
+                "token": token,
+                "forwards": [_to_forward_item(f).model_dump(mode="json") for f in forwards],
+                "stats": stats,
+                "active_filters": effective_statuses,
+            },
         ),
     )
 
