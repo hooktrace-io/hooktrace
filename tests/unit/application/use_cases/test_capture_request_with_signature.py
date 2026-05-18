@@ -265,3 +265,35 @@ async def test_capture_unknown_validator_falls_back_to_no_provider(monkeypatch):
         source_ip="1.2.3.4",
     )
     assert captured.signature_status == "no_provider"
+
+
+async def test_capture_request_handles_corrupt_secret():
+    """Endpoint with stripe provider but corrupt ciphertext → signature_status='invalid'.
+
+    AES-GCM's authentication tag verification raises InvalidTag when the key or
+    ciphertext is wrong. The use case must catch it and degrade gracefully rather
+    than propagating a 500 to the ingestor.
+    """
+    # 28 bytes of garbage — too short for a valid AES-GCM ciphertext (12-byte nonce +
+    # 16-byte tag minimum) and won't decrypt with any key → guaranteed InvalidTag.
+    corrupt_ciphertext = b"\x00" * 28
+
+    endpoint = _make_endpoint(
+        signature_provider="stripe",
+        signature_secret_encrypted=corrupt_ciphertext,
+    )
+    uc, rrepo = _make_use_case(endpoint)
+
+    # Must not raise; should complete capture with status 'invalid'.
+    await uc.execute(
+        token="tok",
+        method="POST",
+        path="/h/tok",
+        query_string=None,
+        headers={"stripe-signature": "t=1,v1=abc"},
+        body=b'{"id":"evt_corrupt"}',
+        source_ip="10.0.0.1",
+    )
+
+    assert len(rrepo.saved) == 1
+    assert rrepo.saved[0].signature_status == "invalid"
