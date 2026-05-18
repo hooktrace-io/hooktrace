@@ -1,7 +1,7 @@
 import re
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
-from typing import Annotated, Literal, cast
+from typing import Annotated, Any, Literal, cast
 from uuid import UUID
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Request
@@ -20,6 +20,7 @@ from webhook_inspector.application.use_cases.list_requests import (
     EndpointNotFoundError,
     ListRequests,
 )
+from webhook_inspector.application.use_cases.list_schemas import ListSchemas
 from webhook_inspector.application.use_cases.update_endpoint_config import UpdateEndpointConfig
 from webhook_inspector.domain.entities.captured_request import CapturedRequest
 from webhook_inspector.domain.entities.endpoint import (
@@ -36,6 +37,7 @@ from webhook_inspector.web.app.deps import (
     get_export_requests,
     get_list_integrations,
     get_list_requests,
+    get_list_schemas,
     get_notifier,
     get_session,
     get_update_endpoint_config,
@@ -238,6 +240,7 @@ class RequestItem(BaseModel):
         | None
     ) = None
     detected_event_type: str | None = None
+    schema_drift: dict[str, Any] | None = None
 
 
 class RequestList(BaseModel):
@@ -287,6 +290,7 @@ async def list_requests(
                 signature_status=r.signature_status,
                 detected_integration=r.detected_integration,
                 detected_event_type=r.detected_event_type,
+                schema_drift=r.schema_drift,
             )
             for r in items
         ],
@@ -327,12 +331,61 @@ async def list_requests_fragment(
                 "signature_status": r.signature_status,
                 "detected_integration": r.detected_integration,
                 "detected_event_type": r.detected_event_type,
+                "schema_drift": r.schema_drift,
             },
             hook_url=hook_url,
         )
         for r in items
     )
     return HTMLResponse(content=rendered)
+
+
+class InferredSchemaResponse(BaseModel):
+    model_config = {"populate_by_name": True}
+
+    integration: Literal[
+        "stripe",
+        "github",
+        "shopify",
+        "twilio",
+        "mailgun",
+        "discord",
+        "slack",
+        "zapier",
+        "n8n",
+    ]
+    event_type: str | None
+    schema_json: dict[str, Any]  # type: ignore[assignment]  # shadows BaseModel.model_json_schema (intentional)
+    sample_count: int
+    last_field_added_at: str | None  # ISO 8601
+    updated_at: str
+
+
+@router.get(
+    "/api/endpoints/{token}/schemas",
+    response_model=list[InferredSchemaResponse],
+)
+async def list_schemas_route(
+    token: str,
+    use_case: ListSchemas = Depends(get_list_schemas),  # noqa: B008
+) -> list[InferredSchemaResponse]:
+    try:
+        schemas = await use_case.execute_for_token(token)
+    except EndpointNotFoundError as e:
+        raise HTTPException(status_code=404, detail="endpoint not found") from e
+    return [
+        InferredSchemaResponse(
+            integration=s.integration,
+            event_type=s.event_type,
+            schema_json=s.schema_json,
+            sample_count=s.sample_count,
+            last_field_added_at=s.last_field_added_at.isoformat()
+            if s.last_field_added_at
+            else None,
+            updated_at=s.updated_at.isoformat(),
+        )
+        for s in schemas
+    ]
 
 
 @router.get("/api/endpoints/{token}/export.json")
@@ -452,6 +505,7 @@ async def viewer(
                         "signature_status": r.signature_status,
                         "detected_integration": r.detected_integration,
                         "detected_event_type": r.detected_event_type,
+                        "schema_drift": r.schema_drift,
                     }
                     for r in initial
                 ],
