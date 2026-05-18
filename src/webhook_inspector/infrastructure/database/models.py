@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID, uuid4
 
-from sqlalchemy import Column, Computed, LargeBinary
+from sqlalchemy import Column, Computed, LargeBinary, SmallInteger
 from sqlalchemy.dialects.postgresql import INET, JSONB, TSVECTOR
 from sqlmodel import Field, SQLModel
 
@@ -79,6 +79,22 @@ class RequestTable(SQLModel, table=True):
             nullable=True,
         ),
     )
+
+
+class ReplayTable(SQLModel, table=True):
+    __tablename__ = "replays"
+
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    request_id: UUID = Field(foreign_key="requests.id", index=True)
+    target_url: str
+    status_code: int | None = Field(default=None, sa_column=Column(SmallInteger, nullable=True))
+    response_body_preview: str | None = None
+    response_headers: dict[str, str] | None = Field(
+        default=None, sa_column=Column(JSONB, nullable=True)
+    )
+    error: str | None = None
+    duration_ms: int
+    attempted_at: datetime
 
 
 class InferredSchemaTable(SQLModel, table=True):
