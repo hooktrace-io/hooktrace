@@ -2,6 +2,8 @@ import logging
 import time
 from dataclasses import dataclass
 
+from cryptography.exceptions import InvalidTag
+
 from webhook_inspector.domain.entities.captured_request import CapturedRequest
 from webhook_inspector.domain.entities.endpoint import Endpoint
 from webhook_inspector.domain.exceptions import EndpointNotFoundError
@@ -45,15 +47,21 @@ class CaptureRequest:
         if endpoint is None:
             raise EndpointNotFoundError(token)
 
-        # Always set signature_status — NEVER leave it None. PR2's aggregation
-        # (list_integrations) does GROUP BY signature_status; NULL rows would
-        # break the integration x signature_status cross-tab.
+        # Always set signature_status — NEVER leave it None. Aggregation queries
+        # GROUP BY signature_status; NULL rows would break the cross-tab histogram.
         if endpoint.signature_provider and endpoint.signature_secret_encrypted:
             validator = get_validator(endpoint.signature_provider)
             if validator is not None:
-                secret = decrypt_secret(self.secrets_key, endpoint.signature_secret_encrypted)
-                result = validator.validate(body=body, headers=headers, secret=secret)
-                signature_status = result.value
+                try:
+                    secret = decrypt_secret(self.secrets_key, endpoint.signature_secret_encrypted)
+                    result = validator.validate(body=body, headers=headers, secret=secret)
+                    signature_status = result.value
+                except InvalidTag:
+                    logger.error(
+                        "decrypt_secret_failed",
+                        extra={"endpoint_id": str(endpoint.id)},
+                    )
+                    signature_status = ValidationResult.INVALID.value
             else:
                 logger.warning(
                     "unknown_signature_provider",
