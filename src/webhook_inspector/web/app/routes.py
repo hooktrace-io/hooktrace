@@ -181,7 +181,20 @@ class RequestItem(BaseModel):
         ]
         | None
     ) = None
-    detected_integration: str | None = None
+    detected_integration: (
+        Literal[
+            "stripe",
+            "github",
+            "shopify",
+            "twilio",
+            "mailgun",
+            "discord",
+            "slack",
+            "zapier",
+            "n8n",
+        ]
+        | None
+    ) = None
     detected_event_type: str | None = None
 
 
