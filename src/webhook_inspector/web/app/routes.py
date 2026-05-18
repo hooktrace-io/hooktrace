@@ -247,6 +247,7 @@ class RequestItem(BaseModel):
     ) = None
     detected_event_type: str | None = None
     schema_drift: dict[str, Any] | None = None
+    trace_summary: list[dict[str, Any]] | None = None
 
 
 class RequestList(BaseModel):
@@ -297,6 +298,7 @@ async def list_requests(
                 detected_integration=r.detected_integration,
                 detected_event_type=r.detected_event_type,
                 schema_drift=r.schema_drift,
+                trace_summary=r.trace_summary,
             )
             for r in items
         ],
@@ -338,6 +340,7 @@ async def list_requests_fragment(
                 "detected_integration": r.detected_integration,
                 "detected_event_type": r.detected_event_type,
                 "schema_drift": r.schema_drift,
+                "trace_summary": r.trace_summary,
             },
             hook_url=hook_url,
         )
@@ -563,6 +566,7 @@ async def viewer(
                         "detected_integration": r.detected_integration,
                         "detected_event_type": r.detected_event_type,
                         "schema_drift": r.schema_drift,
+                        "trace_summary": r.trace_summary,
                     }
                     for r in initial
                 ],
