@@ -20,6 +20,9 @@ class FakeMetricsCollector(MetricsCollector):
     cleaner_runs: list[int] = field(default_factory=list)
     schema_inference_calls: list[str] = field(default_factory=list)
     schema_enqueue_failed_count: int = 0
+    replay_attempt_calls: list[str] = field(default_factory=list)
+    ssrf_block_calls: list[str] = field(default_factory=list)
+    ssrf_dns_validation_calls: list[str] = field(default_factory=list)
 
     def endpoint_created(self) -> None:
         self.endpoints_created_count += 1
@@ -44,3 +47,12 @@ class FakeMetricsCollector(MetricsCollector):
 
     def schema_enqueue_failed(self) -> None:
         self.schema_enqueue_failed_count += 1
+
+    def replay_attempt(self, *, status: str) -> None:
+        self.replay_attempt_calls.append(status)
+
+    def ssrf_block(self, *, reason: str) -> None:
+        self.ssrf_block_calls.append(reason)
+
+    def ssrf_dns_validation(self, *, result: str) -> None:
+        self.ssrf_dns_validation_calls.append(result)
