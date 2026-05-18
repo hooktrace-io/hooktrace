@@ -26,6 +26,7 @@ class PostgresRequestRepository(RequestRepository):
             blob_key=request.blob_key,
             source_ip=request.source_ip,
             received_at=request.received_at,
+            signature_status=request.signature_status,
         )
         self._session.add(row)
         await self._session.flush()
