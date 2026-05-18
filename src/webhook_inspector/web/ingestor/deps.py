@@ -76,8 +76,14 @@ async def get_capture_request(
     session: AsyncSession = Depends(get_session),  # noqa: B008
     settings: Settings = Depends(get_settings),  # noqa: B008
 ) -> CaptureRequest:
-    # Key was validated at startup by lifespan; decode and pass through.
-    key = base64.b64decode(settings.secrets_encryption_key)  # type: ignore[arg-type]
+    # Key was validated at startup by lifespan. When unset (dev mode), pass an
+    # empty sentinel ; the use case skips the decrypt_secret call entirely when
+    # endpoint.signature_provider is None, so capture still works unconfigured.
+    key = (
+        base64.b64decode(settings.secrets_encryption_key)
+        if settings.secrets_encryption_key
+        else b""
+    )
     return CaptureRequest(
         endpoint_repo=PostgresEndpointRepository(session),
         request_repo=PostgresRequestRepository(session),
