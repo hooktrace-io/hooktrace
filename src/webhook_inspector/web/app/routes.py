@@ -167,6 +167,9 @@ async def update_config(
             token=token,
             signature_provider=body.signature.provider if body.signature else None,
             signature_secret=body.signature.secret if body.signature else None,
+            forward_url=str(body.forward.url) if body.forward else None,
+            forward_headers=body.forward.headers if body.forward else None,
+            forward_secret=body.forward.secret if body.forward else None,
         )
     except EndpointNotFoundError as e:
         raise HTTPException(status_code=404, detail="endpoint not found") from e

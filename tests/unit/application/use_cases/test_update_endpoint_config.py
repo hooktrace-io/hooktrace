@@ -75,3 +75,59 @@ async def test_provider_without_secret_skips_encryption():
     saved = repo.updated[0]
     assert saved.signature_provider == "stripe"
     assert saved.signature_secret_encrypted is None
+
+
+async def test_forward_only_sets_url_and_headers():
+    repo = FakeEndpointRepo(seed=_endpoint())
+    use_case = UpdateEndpointConfig(endpoint_repo=repo, secrets_key=_TEST_KEY)
+
+    await use_case.execute(
+        token="abc",
+        forward_url="https://example.com/wh",
+        forward_headers={"X-Custom": "value"},
+    )
+
+    assert len(repo.updated) == 1
+    saved = repo.updated[0]
+    assert saved.forward_url == "https://example.com/wh"
+    assert saved.forward_headers == {"X-Custom": "value"}
+    assert saved.forward_secret_encrypted is None
+
+
+async def test_forward_with_secret_encrypts_it():
+    repo = FakeEndpointRepo(seed=_endpoint())
+    use_case = UpdateEndpointConfig(endpoint_repo=repo, secrets_key=_TEST_KEY)
+
+    await use_case.execute(
+        token="abc",
+        forward_url="https://example.com/wh",
+        forward_secret="my_forward_secret",
+    )
+
+    assert len(repo.updated) == 1
+    saved = repo.updated[0]
+    assert saved.forward_url == "https://example.com/wh"
+    assert saved.forward_secret_encrypted is not None
+    assert decrypt_secret(_TEST_KEY, saved.forward_secret_encrypted) == "my_forward_secret"
+
+
+async def test_forward_without_secret_leaves_existing_encrypted_unchanged():
+    """Updating forward_url without a secret must NOT wipe forward_secret_encrypted."""
+    existing = _endpoint()
+    from webhook_inspector.infrastructure.crypto.secrets import encrypt_secret
+
+    existing.forward_secret_encrypted = encrypt_secret(_TEST_KEY, "existing_secret")
+
+    repo = FakeEndpointRepo(seed=existing)
+    use_case = UpdateEndpointConfig(endpoint_repo=repo, secrets_key=_TEST_KEY)
+
+    await use_case.execute(
+        token="abc",
+        forward_url="https://new.example.com/wh",
+    )
+
+    assert len(repo.updated) == 1
+    saved = repo.updated[0]
+    assert saved.forward_url == "https://new.example.com/wh"
+    # Secret was NOT overwritten
+    assert decrypt_secret(_TEST_KEY, saved.forward_secret_encrypted) == "existing_secret"
