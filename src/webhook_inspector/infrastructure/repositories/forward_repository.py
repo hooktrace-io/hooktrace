@@ -1,3 +1,5 @@
+from datetime import datetime
+from typing import Literal
 from uuid import UUID
 
 from sqlalchemy import select, update
@@ -65,6 +67,49 @@ class PostgresForwardRepository(ForwardRepository):
         )
         rows = (await self._session.execute(stmt)).scalars().all()
         return [_to_entity(r) for r in rows]
+
+    async def claim_for_attempt(self, forward_id: UUID, *, now: datetime) -> Forward | None:
+        stmt = (
+            update(ForwardTable)
+            .where(
+                ForwardTable.id == forward_id,  # type: ignore[arg-type]
+                ForwardTable.status.in_(("pending", "failed")),  # type: ignore[attr-defined]
+            )
+            .values(
+                status="in_flight",
+                attempt_count=ForwardTable.attempt_count + 1,
+                last_attempt_at=now,
+                forward_started_at=now,
+            )
+            .returning(ForwardTable)
+        )
+        result = await self._session.execute(stmt)
+        row = result.scalar_one_or_none()
+        return _to_entity(row) if row is not None else None
+
+    async def record_outcome(
+        self,
+        forward_id: UUID,
+        *,
+        next_status: Literal["succeeded", "failed", "dead"],
+        final_status_code: int | None,
+        final_error: str | None,
+        next_attempt_at: datetime | None,
+        now: datetime,
+    ) -> None:
+        completed_at = now if next_status in ("succeeded", "dead") else None
+        stmt = (
+            update(ForwardTable)
+            .where(ForwardTable.id == forward_id)  # type: ignore[arg-type]
+            .values(
+                status=next_status,
+                final_status_code=final_status_code,
+                final_error=final_error,
+                next_attempt_at=next_attempt_at,
+                forward_completed_at=completed_at,
+            )
+        )
+        await self._session.execute(stmt)
 
 
 def _to_entity(row: ForwardTable) -> Forward:
