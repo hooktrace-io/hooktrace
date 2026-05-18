@@ -35,7 +35,7 @@ logger = logging.getLogger(__name__)
 _REDIS_DSN = os.environ.get("REDIS_URL", "redis://localhost:6379")
 
 
-async def execute_forward(ctx: dict, forward_id_str: str) -> None:
+async def execute_forward(ctx: dict[str, object], forward_id_str: str) -> None:
     """arq job wrapper for ExecuteForward use case.
 
     Builds the use case per-job (fresh DB session per invocation) using
@@ -57,22 +57,22 @@ async def execute_forward(ctx: dict, forward_id_str: str) -> None:
         PostgresRequestRepository,
     )
 
-    session_factory: async_sessionmaker[AsyncSession] = ctx["_session_factory"]  # type: ignore[assignment]
+    session_factory: async_sessionmaker[AsyncSession] = ctx["_session_factory"]
     async with session_factory() as session:
         try:
             use_case = ExecuteForward(
                 endpoint_repo=PostgresEndpointRepository(session),
                 request_repo=PostgresRequestRepository(session),
                 forward_repo=PostgresForwardRepository(session),
-                forward_queue=ArqForwardQueue(ctx["redis"]),  # type: ignore[arg-type]
+                forward_queue=ArqForwardQueue(ctx["redis"]),
                 target=SafeReplayTarget(
                     blocked_host_suffixes=("hooktrace.io",),
                     timeout_seconds=10.0,
                     max_response_bytes=256 * 1024,
                 ),
-                blob_storage=ctx["_blob_storage"],  # type: ignore[arg-type]
-                metrics=ctx["_metrics_collector"],  # type: ignore[arg-type]
-                secrets_key=ctx["_secrets_key"],  # type: ignore[arg-type]
+                blob_storage=ctx["_blob_storage"],
+                metrics=ctx["_metrics_collector"],
+                secrets_key=ctx["_secrets_key"],
             )
             await use_case.execute(UUID(forward_id_str))
             await session.commit()
