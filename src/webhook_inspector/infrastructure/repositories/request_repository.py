@@ -27,6 +27,8 @@ class PostgresRequestRepository(RequestRepository):
             source_ip=request.source_ip,
             received_at=request.received_at,
             signature_status=request.signature_status,
+            detected_integration=request.detected_integration,
+            detected_event_type=request.detected_event_type,
         )
         self._session.add(row)
         await self._session.flush()
