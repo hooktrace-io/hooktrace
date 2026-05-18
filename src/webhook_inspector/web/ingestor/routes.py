@@ -5,6 +5,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
+from opentelemetry import trace
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -15,6 +16,10 @@ from webhook_inspector.application.use_cases.capture_request import (
 from webhook_inspector.config import Settings
 from webhook_inspector.domain.ports.metrics_collector import MetricsCollector
 from webhook_inspector.domain.ports.schema_queue import SchemaQueue
+from webhook_inspector.infrastructure.repositories.request_repository import (
+    PostgresRequestRepository,
+)
+from webhook_inspector.observability.tracing import get_summary_processor
 from webhook_inspector.web.ingestor.deps import (
     _blob_storage,
     get_capture_request,
@@ -107,6 +112,7 @@ async def capture(
     settings: Settings = Depends(get_settings),  # noqa: B008
     schema_queue: SchemaQueue = Depends(get_schema_queue),  # noqa: B008
     metrics: MetricsCollector = Depends(get_metrics),  # noqa: B008
+    session: AsyncSession = Depends(get_session),  # noqa: B008
 ) -> Response:
     content_length = request.headers.get("content-length")
     if content_length and int(content_length) > settings.max_body_bytes:
@@ -128,6 +134,15 @@ async def capture(
         )
     except EndpointNotFoundError as e:
         raise HTTPException(status_code=404, detail="endpoint not found") from e
+
+    # Attach trace summary in the same session as the INSERT — commit is atomic.
+    current_span = trace.get_current_span()
+    trace_id_int = current_span.get_span_context().trace_id
+    if trace_id_int:
+        trace_id_hex = format(trace_id_int, "032x")
+        summary = get_summary_processor().pop_summary(trace_id_hex)
+        if summary:
+            await PostgresRequestRepository(session).update_trace_summary(_captured.id, summary)
 
     if _captured.detected_integration is not None:
         background_tasks.add_task(
