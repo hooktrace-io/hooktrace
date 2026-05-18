@@ -30,6 +30,15 @@ class EndpointTable(SQLModel, table=True):
         default=None, sa_column=Column(LargeBinary, nullable=True)
     )
 
+    # V3 — forward config (Block 1 of PR7+PR8)
+    forward_url: str | None = Field(default=None)
+    forward_headers: dict[str, str] | None = Field(
+        default=None, sa_column=Column(JSONB, nullable=True)
+    )
+    forward_secret_encrypted: bytes | None = Field(
+        default=None, sa_column=Column(LargeBinary, nullable=True)
+    )
+
 
 class RequestTable(SQLModel, table=True):
     __tablename__ = "requests"
@@ -89,3 +98,21 @@ class ReplayTable(SQLModel, table=True):
     error: str | None = None
     duration_ms: int
     attempted_at: datetime
+
+
+class ForwardTable(SQLModel, table=True):
+    __tablename__ = "forwards"
+
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    request_id: UUID = Field(foreign_key="requests.id", nullable=False)
+    endpoint_id: UUID = Field(foreign_key="endpoints.id", nullable=False)
+    target_url: str = Field(nullable=False)
+    status: str = Field(nullable=False)
+    attempt_count: int = Field(default=0, nullable=False)
+    last_attempt_at: datetime | None = Field(default=None)
+    next_attempt_at: datetime | None = Field(default=None)
+    final_status_code: int | None = Field(default=None)
+    final_error: str | None = Field(default=None)
+    forward_started_at: datetime | None = Field(default=None)
+    forward_completed_at: datetime | None = Field(default=None)
+    created_at: datetime = Field(nullable=False)

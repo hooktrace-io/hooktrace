@@ -28,6 +28,9 @@ class PostgresEndpointRepository(EndpointRepository):
             response_delay_ms=endpoint.response_delay_ms,
             signature_provider=endpoint.signature_provider,
             signature_secret_encrypted=endpoint.signature_secret_encrypted,
+            forward_url=endpoint.forward_url,
+            forward_headers=endpoint.forward_headers,
+            forward_secret_encrypted=endpoint.forward_secret_encrypted,
         )
         self._session.add(row)
         try:
@@ -50,6 +53,9 @@ class PostgresEndpointRepository(EndpointRepository):
                 response_body=endpoint.response_body,
                 response_headers=endpoint.response_headers,
                 response_delay_ms=endpoint.response_delay_ms,
+                forward_url=endpoint.forward_url,
+                forward_headers=endpoint.forward_headers,
+                forward_secret_encrypted=endpoint.forward_secret_encrypted,
             )
         )
         result = await self._session.execute(stmt)
@@ -100,4 +106,7 @@ def _to_entity(row: EndpointTable) -> Endpoint:
         response_delay_ms=row.response_delay_ms,
         signature_provider=row.signature_provider,
         signature_secret_encrypted=row.signature_secret_encrypted,
+        forward_url=row.forward_url,
+        forward_headers=row.forward_headers,
+        forward_secret_encrypted=row.forward_secret_encrypted,
     )

@@ -32,6 +32,11 @@ class Endpoint:
     signature_provider: str | None = None
     signature_secret_encrypted: bytes | None = None
 
+    # V3 — forward config (Block 1 of PR7+PR8)
+    forward_url: str | None = None
+    forward_headers: dict[str, str] | None = None
+    forward_secret_encrypted: bytes | None = None
+
     @classmethod
     def create(
         cls,
