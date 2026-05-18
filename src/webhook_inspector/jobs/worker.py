@@ -9,7 +9,7 @@ no-module-level-side-effects rule established for the web/ingestor apps.
 
 import logging
 import os
-from typing import ClassVar
+from typing import Any, ClassVar
 from uuid import UUID
 
 from arq.connections import RedisSettings
@@ -35,7 +35,7 @@ logger = logging.getLogger(__name__)
 _REDIS_DSN = os.environ.get("REDIS_URL", "redis://localhost:6379")
 
 
-async def execute_forward(ctx: dict[str, object], forward_id_str: str) -> None:
+async def execute_forward(ctx: dict[str, Any], forward_id_str: str) -> None:
     """arq job wrapper for ExecuteForward use case.
 
     Builds the use case per-job (fresh DB session per invocation) using
