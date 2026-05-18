@@ -16,12 +16,17 @@ from webhook_inspector.application.use_cases.export_requests import ExportReques
 from webhook_inspector.application.use_cases.list_integrations import ListIntegrations
 from webhook_inspector.application.use_cases.list_requests import ListRequests
 from webhook_inspector.application.use_cases.list_schemas import ListSchemas
+from webhook_inspector.application.use_cases.replay_request import ReplayRequest
 from webhook_inspector.application.use_cases.update_endpoint_config import UpdateEndpointConfig
 from webhook_inspector.config import Settings
 from webhook_inspector.domain.ports.metrics_collector import MetricsCollector
+from webhook_inspector.infrastructure.http.safe_replay_target import SafeReplayTarget
 from webhook_inspector.infrastructure.notifications.postgres_notifier import PostgresNotifier
 from webhook_inspector.infrastructure.repositories.endpoint_repository import (
     PostgresEndpointRepository,
+)
+from webhook_inspector.infrastructure.repositories.replay_repository import (
+    PostgresReplayRepository,
 )
 from webhook_inspector.infrastructure.repositories.request_repository import (
     PostgresRequestRepository,
@@ -127,6 +132,24 @@ async def get_list_integrations(
     return ListIntegrations(
         endpoint_repo=PostgresEndpointRepository(session),
         request_repo=PostgresRequestRepository(session),
+    )
+
+
+async def get_replay_request(
+    session: AsyncSession = Depends(get_session),  # noqa: B008
+    settings: Settings = Depends(get_settings),  # noqa: B008
+) -> ReplayRequest:
+    return ReplayRequest(
+        endpoint_repo=PostgresEndpointRepository(session),
+        request_repo=PostgresRequestRepository(session),
+        replay_repo=PostgresReplayRepository(session),
+        target=SafeReplayTarget(
+            blocked_host_suffixes=("hooktrace.io",),
+            timeout_seconds=10.0,
+            max_response_bytes=256 * 1024,
+        ),
+        blob_storage=make_blob_storage(settings),
+        metrics=get_metrics(),
     )
 
 

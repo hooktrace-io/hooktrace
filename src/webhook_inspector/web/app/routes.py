@@ -6,7 +6,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, HttpUrl
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -21,6 +21,11 @@ from webhook_inspector.application.use_cases.list_requests import (
     ListRequests,
 )
 from webhook_inspector.application.use_cases.list_schemas import ListSchemas
+from webhook_inspector.application.use_cases.replay_request import (
+    ReplayPayloadTooLargeError,
+    ReplayRequest,
+    RequestNotFoundError,
+)
 from webhook_inspector.application.use_cases.update_endpoint_config import UpdateEndpointConfig
 from webhook_inspector.domain.entities.captured_request import CapturedRequest
 from webhook_inspector.domain.entities.endpoint import (
@@ -39,6 +44,7 @@ from webhook_inspector.web.app.deps import (
     get_list_requests,
     get_list_schemas,
     get_notifier,
+    get_replay_request,
     get_session,
     get_update_endpoint_config,
 )
@@ -386,6 +392,57 @@ async def list_schemas_route(
         )
         for s in schemas
     ]
+
+
+class ReplayBody(BaseModel):
+    target_url: HttpUrl  # Pydantic validates http(s) at the boundary; SSRF guard does the rest
+    include_headers: bool = True
+    include_body: bool = True
+
+
+class ReplayResponse(BaseModel):
+    id: UUID
+    status_code: int | None
+    error: str | None
+    duration_ms: int
+    attempted_at: str
+
+
+@router.post(
+    "/api/endpoints/{token}/requests/{request_id}/replay",
+    response_model=ReplayResponse,
+    status_code=200,
+)
+async def replay_request_route(
+    token: str,
+    request_id: UUID,
+    body: ReplayBody,
+    use_case: ReplayRequest = Depends(get_replay_request),  # noqa: B008
+) -> ReplayResponse:
+    try:
+        replay = await use_case.execute(
+            token=token,
+            request_id=request_id,
+            target_url=str(body.target_url),
+            include_headers=body.include_headers,
+            include_body=body.include_body,
+        )
+    except EndpointNotFoundError as e:
+        raise HTTPException(status_code=404, detail="endpoint not found") from e
+    except RequestNotFoundError as e:
+        # Same 404 regardless of "endpoint missing" vs "wrong owner" — leaking
+        # the difference would let an attacker probe request_ids across tokens.
+        raise HTTPException(status_code=404, detail="request not found") from e
+    except ReplayPayloadTooLargeError as e:
+        raise HTTPException(status_code=413, detail="payload too large") from e
+
+    return ReplayResponse(
+        id=replay.id,
+        status_code=replay.status_code,
+        error=replay.error,
+        duration_ms=replay.duration_ms,
+        attempted_at=replay.attempted_at.isoformat(),
+    )
 
 
 @router.get("/api/endpoints/{token}/export.json")
