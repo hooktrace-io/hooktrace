@@ -48,7 +48,7 @@ class CaptureRequest:
             raise EndpointNotFoundError(token)
 
         # Always set signature_status — NEVER leave it None. Aggregation queries
-        # GROUP BY signature_status; NULL rows would break the cross-tab histogram.
+        # GROUP BY signature_status; NULL rows break the cross-tab histogram.
         if endpoint.signature_provider and endpoint.signature_secret_encrypted:
             validator = get_validator(endpoint.signature_provider)
             if validator is not None:

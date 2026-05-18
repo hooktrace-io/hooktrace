@@ -18,7 +18,7 @@ class TwilioValidator(HmacValidator):
 
     Full URL-aware validation (including the URL component) is V4+ work — it requires
     the ingestor to pass the original request URL through the validation context, which
-    PR1 does not yet support.
+    is not yet supported.
 
     The 'secret' field is Twilio's Auth Token.
     Header: X-Twilio-Signature: <base64_hmac_sha1>

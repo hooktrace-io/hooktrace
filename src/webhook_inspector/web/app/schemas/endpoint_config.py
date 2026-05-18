@@ -23,8 +23,8 @@ class SignatureConfig(BaseModel):
 
 class EndpointConfigPatch(BaseModel):
     """Partial update of endpoint config. Each field is independently optional.
-    Extensions: PR7 adds `forward: ForwardConfig | None`. `transform: str | None`
-    (F6) is deferred to V4 -- when it lands, it slots in as a new optional field.
+    Future extensions: `forward: ForwardConfig | None` for forwarding configuration.
+    `transform: str | None` is deferred to V4 — when it lands, it slots in as a new optional field.
     """
 
     signature: SignatureConfig | None = None

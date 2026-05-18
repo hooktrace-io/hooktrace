@@ -20,7 +20,7 @@ class DiscordValidator(HmacValidator):
 
     Signed payload: (timestamp_string + body_string).encode('utf-8')
 
-    NOTE FOR PR1.3+: The DB/API surface stores this as the 'signing_secret' field. Callers must
+    NOTE: The DB/API surface stores this as the 'signing_secret' field. Callers must
     be aware that for Discord, this field holds a public key, not a symmetric secret. Consider
     a separate 'signing_public_key' column in a future schema revision if the distinction matters.
     """

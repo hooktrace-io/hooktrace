@@ -38,8 +38,8 @@ class PostgresEndpointRepository(EndpointRepository):
             ) from e
 
     async def update(self, endpoint: Endpoint) -> None:
-        # Persists signature config (PR1) AND response config — both are user-mutable
-        # endpoint settings, both can be touched by future combined PATCH routes (PR7).
+        # Persists signature config AND response config — both are user-mutable
+        # endpoint settings that can be updated together via the PATCH route.
         stmt = (
             update(EndpointTable)
             .where(EndpointTable.id == endpoint.id)  # type: ignore[arg-type]
