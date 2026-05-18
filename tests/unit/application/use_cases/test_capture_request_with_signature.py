@@ -222,3 +222,46 @@ async def test_capture_missing_header_records_missing_status():
     )
 
     assert rrepo.saved[0].signature_status == "missing"
+
+
+async def test_capture_unknown_validator_falls_back_to_no_provider(monkeypatch):
+    """If the endpoint's signature_provider isn't in the factory registry
+    (e.g. a new service added to the enum but not yet wired to a validator),
+    the use case logs a warning and writes 'no_provider' — never crashes.
+    """
+    from webhook_inspector.application.use_cases import capture_request as cr_mod
+
+    monkeypatch.setattr(cr_mod, "get_validator", lambda _provider: None)
+
+    now = datetime.now(UTC)
+    endpoint = Endpoint(
+        id=uuid4(),
+        token="test-token",
+        created_at=now,
+        expires_at=now + timedelta(days=7),
+        request_count=0,
+        signature_provider="fictional-provider",
+        signature_secret_encrypted=b"\x00" * 12 + b"ciphertext",  # any non-None bytes
+    )
+
+    endpoint_repo = FakeEndpointRepo(seed=endpoint)
+    rrepo = FakeRequestRepo()
+    uc = CaptureRequest(
+        endpoint_repo=endpoint_repo,
+        request_repo=rrepo,
+        blob_storage=FakeBlobStorage(),
+        inline_threshold=8192,
+        metrics=FakeMetricsCollector(),
+        secrets_key=_TEST_KEY,
+    )
+
+    captured, _endpoint = await uc.execute(
+        token="test-token",
+        method="POST",
+        path="/h/test-token",
+        query_string=None,
+        headers={"stripe-signature": "irrelevant"},
+        body=b"x",
+        source_ip="1.2.3.4",
+    )
+    assert captured.signature_status == "no_provider"
