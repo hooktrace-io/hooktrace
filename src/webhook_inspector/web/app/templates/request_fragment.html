@@ -16,4 +16,15 @@
   {% set color = {"valid": "emerald", "invalid": "rose", "missing": "amber", "no_provider": "slate"}.get(req.signature_status, "slate") %}
   <span class="text-{{ color }}-400 text-xs">{{ req.signature_status }}</span>
   {% endif %}
+  {% if req.detected_integration %}
+  {% set int_color = {
+      "stripe": "violet", "github": "slate", "shopify": "emerald",
+      "twilio": "rose", "mailgun": "sky", "discord": "indigo",
+      "slack": "amber", "zapier": "orange", "n8n": "pink"
+  }.get(req.detected_integration, "gray") %}
+  <span class="text-{{ int_color }}-400 text-xs">{{ req.detected_integration }}</span>
+  {% if req.detected_event_type %}
+  <span class="text-{{ int_color }}-300 text-xs">{{ req.detected_event_type }}</span>
+  {% endif %}
+  {% endif %}
 </li>

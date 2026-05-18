@@ -68,6 +68,8 @@ async def stream_for_token(
                     "headers": req.headers,
                     "body_preview": req.body_preview,
                     "signature_status": req.signature_status,
+                    "detected_integration": req.detected_integration,
+                    "detected_event_type": req.detected_event_type,
                 },
                 hook_url=hook_url,
             )
