@@ -15,7 +15,7 @@ def _now() -> datetime:
 
 
 def test_new_factory_returns_pending_status() -> None:
-    fwd = Forward.new(
+    fwd = Forward.create(
         request_id=uuid4(),
         endpoint_id=uuid4(),
         target_url="https://example.com/hook",
@@ -26,7 +26,7 @@ def test_new_factory_returns_pending_status() -> None:
 
 def test_new_factory_sets_next_attempt_at_to_now() -> None:
     now = _now()
-    fwd = Forward.new(
+    fwd = Forward.create(
         request_id=uuid4(),
         endpoint_id=uuid4(),
         target_url="https://example.com/hook",
@@ -36,7 +36,7 @@ def test_new_factory_sets_next_attempt_at_to_now() -> None:
 
 
 def test_new_factory_attempt_count_zero() -> None:
-    fwd = Forward.new(
+    fwd = Forward.create(
         request_id=uuid4(),
         endpoint_id=uuid4(),
         target_url="https://example.com/hook",

@@ -28,7 +28,7 @@ class Forward:
     created_at: datetime
 
     @classmethod
-    def new(
+    def create(
         cls,
         *,
         request_id: UUID,
