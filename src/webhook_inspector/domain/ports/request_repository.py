@@ -3,6 +3,7 @@ from collections.abc import AsyncIterator
 from uuid import UUID
 
 from webhook_inspector.domain.entities.captured_request import CapturedRequest
+from webhook_inspector.domain.entities.integration_aggregate import IntegrationAggregate
 
 
 class RequestRepository(ABC):
@@ -33,4 +34,9 @@ class RequestRepository(ABC):
     @abstractmethod
     async def count_by_endpoint(self, endpoint_id: UUID) -> int:
         """Return total number of captured requests for the endpoint."""
+        ...
+
+    @abstractmethod
+    async def aggregate_by_integration(self, endpoint_id: UUID) -> list[IntegrationAggregate]:
+        """Return per-integration request aggregates for the endpoint."""
         ...
