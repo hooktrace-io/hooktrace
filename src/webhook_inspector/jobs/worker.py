@@ -10,6 +10,7 @@ no-module-level-side-effects rule established for the web/ingestor apps.
 import logging
 import os
 from typing import ClassVar
+from uuid import UUID
 
 from arq.connections import RedisSettings
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -34,14 +35,64 @@ logger = logging.getLogger(__name__)
 _REDIS_DSN = os.environ.get("REDIS_URL", "redis://localhost:6379")
 
 
+async def execute_forward(ctx: dict, forward_id_str: str) -> None:
+    """arq job wrapper for ExecuteForward use case.
+
+    Builds the use case per-job (fresh DB session per invocation) using
+    stateless deps stashed on ctx at startup. Catches all uncaught exceptions,
+    logs them, and returns — the use case owns the retry budget via
+    claim_for_attempt + record_outcome; we do not let arq's max_tries
+    silently swallow failures.
+    """
+    from webhook_inspector.application.use_cases.execute_forward import ExecuteForward
+    from webhook_inspector.infrastructure.http.safe_replay_target import SafeReplayTarget
+    from webhook_inspector.infrastructure.queue.arq_forward_queue import ArqForwardQueue
+    from webhook_inspector.infrastructure.repositories.endpoint_repository import (
+        PostgresEndpointRepository,
+    )
+    from webhook_inspector.infrastructure.repositories.forward_repository import (
+        PostgresForwardRepository,
+    )
+    from webhook_inspector.infrastructure.repositories.request_repository import (
+        PostgresRequestRepository,
+    )
+
+    session_factory: async_sessionmaker[AsyncSession] = ctx["_session_factory"]  # type: ignore[assignment]
+    async with session_factory() as session:
+        try:
+            use_case = ExecuteForward(
+                endpoint_repo=PostgresEndpointRepository(session),
+                request_repo=PostgresRequestRepository(session),
+                forward_repo=PostgresForwardRepository(session),
+                forward_queue=ArqForwardQueue(ctx["redis"]),  # type: ignore[arg-type]
+                target=SafeReplayTarget(
+                    blocked_host_suffixes=("hooktrace.io",),
+                    timeout_seconds=10.0,
+                    max_response_bytes=256 * 1024,
+                ),
+                blob_storage=ctx["_blob_storage"],  # type: ignore[arg-type]
+                metrics=ctx["_metrics_collector"],  # type: ignore[arg-type]
+                secrets_key=ctx["_secrets_key"],  # type: ignore[arg-type]
+            )
+            await use_case.execute(UUID(forward_id_str))
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            logger.exception(
+                "execute_forward_uncaught",
+                extra={"forward_id": forward_id_str},
+            )
+
+
 async def startup(ctx: dict[str, object]) -> None:
     """arq on_startup hook — equivalent of FastAPI lifespan.
     Wires logging + tracing + metrics so the worker is observable the same
     way as web/ingestor (structlog JSON output to fly logs). Stashes a DB
     engine + session factory + blob storage + metrics collector on ctx so
-    arq job wrappers (added in PR7) can reuse them without rebuilding per
-    invocation.
+    arq job wrappers can reuse them without rebuilding per invocation.
     """
+    import base64
+
     settings = Settings()
     configure_logging(settings.log_level, settings.service_name + "-worker")
     configure_tracing(settings.service_name + "-worker", settings.environment)
@@ -68,9 +119,16 @@ async def startup(ctx: dict[str, object]) -> None:
     meter = otel_metrics.get_meter("webhook-inspector-worker")
     metrics_collector = OtelMetricsCollector(meter)
 
+    secrets_key = (
+        base64.b64decode(settings.secrets_encryption_key)
+        if settings.secrets_encryption_key
+        else b""
+    )
+
     ctx["_blob_storage"] = blob_storage
     ctx["_metrics_collector"] = metrics_collector
     ctx["_settings"] = settings
+    ctx["_secrets_key"] = secrets_key
 
 
 async def shutdown(ctx: dict[str, object]) -> None:
@@ -101,9 +159,7 @@ class WorkerSettings:
     # dependency, so DATABASE_URL is not required to import this module).
     redis_settings = RedisSettings.from_dsn(_REDIS_DSN)
 
-    # No arq jobs registered yet. PR7 (Forward + retry + DLQ) will populate
-    # this list with `forward_request` (and any companions).
-    functions: ClassVar[list[object]] = []
+    functions: ClassVar[list[object]] = [execute_forward]
 
     # Retry policy. NOT 1: a non-zero margin lets arq pick up a job whose
     # function crashed before its own retry logic ran (e.g. OOM, SIGTERM
