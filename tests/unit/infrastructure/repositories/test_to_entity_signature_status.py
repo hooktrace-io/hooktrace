@@ -24,3 +24,45 @@ def test_to_entity_propagates_signature_status() -> None:
     )
     entity = _to_entity(row)
     assert entity.signature_status == "valid"
+
+
+def test_to_entity_propagates_integration_fields() -> None:
+    row = RequestTable(
+        id=uuid.uuid4(),
+        endpoint_id=uuid.uuid4(),
+        method="POST",
+        path="/",
+        query_string=None,
+        headers={},
+        body_preview=None,
+        body_size=2,
+        blob_key=None,
+        source_ip="127.0.0.1",
+        received_at=datetime.now(UTC),
+        signature_status="no_provider",
+        detected_integration="github",
+        detected_event_type="push",
+    )
+    entity = _to_entity(row)
+    assert entity.detected_integration == "github"
+    assert entity.detected_event_type == "push"
+
+
+def test_to_entity_integration_fields_default_none() -> None:
+    row = RequestTable(
+        id=uuid.uuid4(),
+        endpoint_id=uuid.uuid4(),
+        method="POST",
+        path="/",
+        query_string=None,
+        headers={},
+        body_preview=None,
+        body_size=2,
+        blob_key=None,
+        source_ip="127.0.0.1",
+        received_at=datetime.now(UTC),
+        signature_status="no_provider",
+    )
+    entity = _to_entity(row)
+    assert entity.detected_integration is None
+    assert entity.detected_event_type is None

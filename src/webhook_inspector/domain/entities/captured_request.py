@@ -21,6 +21,8 @@ class CapturedRequest:
     source_ip: str
     received_at: datetime
     signature_status: str | None = None
+    detected_integration: str | None = None
+    detected_event_type: str | None = None
 
     @classmethod
     def create(
@@ -34,6 +36,8 @@ class CapturedRequest:
         source_ip: str,
         inline_threshold_bytes: int,
         signature_status: str = _NO_PROVIDER_VALUE,
+        detected_integration: str | None = None,
+        detected_event_type: str | None = None,
     ) -> "CapturedRequest":
         if method != method.upper():
             raise ValueError("method must be uppercase")
@@ -61,6 +65,8 @@ class CapturedRequest:
             source_ip=source_ip,
             received_at=datetime.now(UTC),
             signature_status=signature_status,
+            detected_integration=detected_integration,
+            detected_event_type=detected_event_type,
         )
 
 

@@ -118,4 +118,6 @@ def _to_entity(row: RequestTable) -> CapturedRequest:
         source_ip=row.source_ip,
         received_at=row.received_at,
         signature_status=row.signature_status,
+        detected_integration=row.detected_integration,
+        detected_event_type=row.detected_event_type,
     )

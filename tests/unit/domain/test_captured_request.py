@@ -95,3 +95,37 @@ def test_method_must_be_uppercase():
             source_ip="192.0.2.1",
             inline_threshold_bytes=8192,
         )
+
+
+def test_captured_request_create_accepts_integration_fields():
+    req = CapturedRequest.create(
+        endpoint_id=uuid4(),
+        method="POST",
+        path="/h/abc",
+        query_string=None,
+        headers={},
+        body=b"{}",
+        source_ip="192.0.2.1",
+        inline_threshold_bytes=8192,
+        detected_integration="stripe",
+        detected_event_type="charge.succeeded",
+    )
+
+    assert req.detected_integration == "stripe"
+    assert req.detected_event_type == "charge.succeeded"
+
+
+def test_captured_request_integration_fields_default_to_none():
+    req = CapturedRequest.create(
+        endpoint_id=uuid4(),
+        method="POST",
+        path="/h/abc",
+        query_string=None,
+        headers={},
+        body=b"{}",
+        source_ip="192.0.2.1",
+        inline_threshold_bytes=8192,
+    )
+
+    assert req.detected_integration is None
+    assert req.detected_event_type is None
