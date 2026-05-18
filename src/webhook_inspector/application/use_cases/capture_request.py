@@ -93,6 +93,7 @@ class CaptureRequest:
                     blob_key=None,
                     source_ip=captured.source_ip,
                     received_at=captured.received_at,
+                    signature_status=captured.signature_status,
                 )
 
         await self.request_repo.save(captured)
