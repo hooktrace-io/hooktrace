@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import (
 
 from webhook_inspector.application.use_cases.create_endpoint import CreateEndpoint
 from webhook_inspector.application.use_cases.export_requests import ExportRequests
+from webhook_inspector.application.use_cases.list_integrations import ListIntegrations
 from webhook_inspector.application.use_cases.list_requests import ListRequests
 from webhook_inspector.application.use_cases.update_endpoint_config import UpdateEndpointConfig
 from webhook_inspector.config import Settings
@@ -104,6 +105,15 @@ async def get_export_requests(
         request_repo=PostgresRequestRepository(session),
         blob_storage=make_blob_storage(settings),
         max_requests=settings.export_max_requests,
+    )
+
+
+async def get_list_integrations(
+    session: AsyncSession = Depends(get_session),  # noqa: B008
+) -> ListIntegrations:
+    return ListIntegrations(
+        endpoint_repo=PostgresEndpointRepository(session),
+        request_repo=PostgresRequestRepository(session),
     )
 
 
