@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>hooktrace — {{ token }} — integrations</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-900 text-slate-100 min-h-screen font-mono">
+  <header class="border-b border-slate-700 px-6 py-4 flex items-center justify-between gap-4">
+    <div>
+      <h1 class="text-xl font-mono">hooktrace</h1>
+      <p class="text-sm text-slate-400 mt-1">
+        Token: <code class="bg-slate-800 px-2 py-1 rounded">{{ token }}</code>
+      </p>
+    </div>
+    <nav class="flex gap-3 text-sm">
+      <a href="/{{ token }}"
+         class="bg-slate-700 hover:bg-slate-600 text-slate-100 px-3 py-2 rounded">
+        Requests
+      </a>
+      <span class="bg-slate-800 border border-slate-600 text-slate-300 px-3 py-2 rounded cursor-default">
+        Integrations
+      </span>
+    </nav>
+  </header>
+
+  <main class="px-6 py-6">
+    {% if aggregates %}
+      <div class="space-y-4">
+        {% for agg in aggregates %}
+          {% set int_color = {
+              "stripe": "violet", "github": "zinc", "shopify": "green",
+              "twilio": "red", "mailgun": "sky", "discord": "indigo",
+              "slack": "yellow", "zapier": "orange", "n8n": "pink"
+          }.get(agg.integration, "gray") %}
+          <div class="border border-slate-700 rounded-lg p-4 bg-slate-800">
+            <!-- Integration header -->
+            <div class="flex items-center gap-3 mb-3">
+              <span class="text-{{ int_color }}-400 font-bold text-lg">{{ agg.integration }}</span>
+              <span class="bg-slate-700 text-slate-300 text-xs px-2 py-0.5 rounded">
+                {{ agg.total }} request{{ "s" if agg.total != 1 else "" }}
+              </span>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <!-- Signature status breakdown -->
+              <div>
+                <p class="text-slate-400 text-xs uppercase tracking-wide mb-2">Signature Status</p>
+                {% set status_colors = {
+                    "valid": "emerald",
+                    "invalid": "rose",
+                    "missing": "amber",
+                    "no_provider": "slate"
+                } %}
+                {% for status, count in agg.signature_status_counts.items() %}
+                  {% set color = status_colors.get(status, "slate") %}
+                  <div class="flex items-center justify-between text-sm py-0.5">
+                    <span class="text-{{ color }}-400">{{ status }}</span>
+                    <span class="text-slate-300 tabular-nums">{{ count }}</span>
+                  </div>
+                {% else %}
+                  <p class="text-slate-500 text-sm">—</p>
+                {% endfor %}
+              </div>
+
+              <!-- Event types breakdown -->
+              {% if agg.event_types %}
+              <div>
+                <p class="text-slate-400 text-xs uppercase tracking-wide mb-2">Event Types</p>
+                {% for event_type, count in agg.event_types.items() %}
+                  <div class="flex items-center justify-between text-sm py-0.5">
+                    <span class="text-{{ int_color }}-300 truncate max-w-xs">{{ event_type }}</span>
+                    <span class="text-slate-300 tabular-nums ml-2">{{ count }}</span>
+                  </div>
+                {% endfor %}
+              </div>
+              {% endif %}
+            </div>
+          </div>
+        {% endfor %}
+      </div>
+    {% else %}
+      <div class="text-center py-16 text-slate-500">
+        <p class="text-lg mb-2">No integrations detected yet.</p>
+        <p class="text-sm">
+          Send a webhook from Stripe, GitHub, Shopify, or another supported service
+          to see it appear here.
+        </p>
+      </div>
+    {% endif %}
+  </main>
+</body>
+</html>
