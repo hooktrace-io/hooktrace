@@ -104,6 +104,7 @@ def _forward(
         forward_started_at=None,
         forward_completed_at=None,
         created_at=_NOW,
+        manual_retry_at=None,
     )
 
 

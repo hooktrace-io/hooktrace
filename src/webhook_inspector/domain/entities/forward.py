@@ -3,7 +3,7 @@ from datetime import datetime
 from typing import Literal
 from uuid import UUID, uuid4
 
-ForwardStatus = Literal["pending", "in_flight", "succeeded", "failed", "dead"]
+ForwardStatus = Literal["pending", "in_flight", "succeeded", "failed", "dead", "abandoned"]
 
 # Schedule for failed retries (seconds since last_attempt_at). 5 entries =
 # 5 total attempts before status='dead'. Indexed by (attempt_count - 1).
@@ -26,6 +26,7 @@ class Forward:
     forward_started_at: datetime | None
     forward_completed_at: datetime | None
     created_at: datetime
+    manual_retry_at: datetime | None
 
     @classmethod
     def create(
@@ -50,4 +51,5 @@ class Forward:
             forward_started_at=None,
             forward_completed_at=None,
             created_at=now,
+            manual_retry_at=None,
         )

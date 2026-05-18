@@ -116,3 +116,6 @@ class ForwardTable(SQLModel, table=True):
     forward_started_at: datetime | None = Field(default=None)
     forward_completed_at: datetime | None = Field(default=None)
     created_at: datetime = Field(nullable=False)
+    # V3 — set when an operator manually retries a forward from the DLQ UI.
+    # Audit trail only; never reset to None once set.
+    manual_retry_at: datetime | None = Field(default=None)

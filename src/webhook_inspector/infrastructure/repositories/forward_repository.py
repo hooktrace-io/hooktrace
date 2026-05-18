@@ -33,6 +33,7 @@ class PostgresForwardRepository(ForwardRepository):
             forward_started_at=forward.forward_started_at,
             forward_completed_at=forward.forward_completed_at,
             created_at=forward.created_at,
+            manual_retry_at=forward.manual_retry_at,
         )
         self._session.add(row)
         await self._session.flush()
@@ -55,6 +56,7 @@ class PostgresForwardRepository(ForwardRepository):
                 final_error=forward.final_error,
                 forward_started_at=forward.forward_started_at,
                 forward_completed_at=forward.forward_completed_at,
+                manual_retry_at=forward.manual_retry_at,
             )
         )
         await self._session.execute(stmt)
@@ -127,4 +129,5 @@ def _to_entity(row: ForwardTable) -> Forward:
         forward_started_at=row.forward_started_at,
         forward_completed_at=row.forward_completed_at,
         created_at=row.created_at,
+        manual_retry_at=row.manual_retry_at,
     )
