@@ -17,20 +17,8 @@ from webhook_inspector.web.ingestor.routes import router
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = Settings()
     configure_logging(settings.log_level, settings.service_name + "-ingestor")
-    configure_tracing(
-        settings.service_name + "-ingestor",
-        settings.environment,
-        cloud_trace_enabled=settings.cloud_trace_enabled,
-        otlp_endpoint=settings.otlp_endpoint,
-        otlp_headers=settings.otlp_headers,
-        sample_ratio=settings.trace_sample_ratio,
-    )
-    configure_metrics(
-        service_name=settings.service_name + "-ingestor",
-        cloud_metrics_enabled=settings.cloud_metrics_enabled,
-        otlp_endpoint=settings.otlp_endpoint,
-        otlp_headers=settings.otlp_headers,
-    )
+    configure_tracing(settings.service_name + "-ingestor", settings.environment)
+    configure_metrics(service_name=settings.service_name + "-ingestor")
     instrument_app(app, _engine())
     # Validate secrets key at startup so a misconfigured deploy fails fast.
     _validate_secrets_key(settings.secrets_encryption_key)

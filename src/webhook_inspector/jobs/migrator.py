@@ -14,14 +14,7 @@ logger = logging.getLogger(__name__)
 def main() -> None:
     settings = Settings()
     configure_logging(settings.log_level, settings.service_name + "-migrator")
-    configure_tracing(
-        settings.service_name + "-migrator",
-        settings.environment,
-        cloud_trace_enabled=settings.cloud_trace_enabled,
-        otlp_endpoint=settings.otlp_endpoint,
-        otlp_headers=settings.otlp_headers,
-        sample_ratio=settings.trace_sample_ratio,
-    )
+    configure_tracing(settings.service_name + "-migrator", settings.environment)
 
     logger.info("starting migration")
     result = subprocess.run(
