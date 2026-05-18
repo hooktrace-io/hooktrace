@@ -102,24 +102,23 @@ def settings(monkeypatch, database_url):
 
 
 def _clear_summary_processor_buffer():
-    """No-op until PR5 introduces tracing._summary_processor."""
+    """Reset the InMemoryRequestSpanProcessor singleton between tests so a
+    trace from one test doesn't bleed into the next. Uses the processor's
+    own shutdown() so the RLock is honored (don't reach into _buffer).
+    """
     try:
         from webhook_inspector.observability import tracing
 
         proc = getattr(tracing, "_summary_processor", None)
         if proc is not None:
-            proc._buffer.clear()
+            proc.shutdown()
     except (ImportError, AttributeError):
         pass
 
 
 @pytest.fixture
 async def _reset_summary_processor():
-    """Clear the InMemoryRequestSpanProcessor singleton between tests. The
-    processor will be introduced by PR5 ; for now this fixture is a no-op
-    because tracing._summary_processor doesn't exist yet — defensive against
-    AttributeError, treats missing attr as 'nothing to reset'.
-    """
+    """Clear the InMemoryRequestSpanProcessor singleton between tests."""
     _clear_summary_processor_buffer()
     yield
     _clear_summary_processor_buffer()
