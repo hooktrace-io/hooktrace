@@ -42,7 +42,10 @@ def get_summary_processor() -> InMemoryRequestSpanProcessor:
 def configure_tracing(service_name: str, environment: str) -> None:
     """Build + install the global TracerProvider.
 
-    Idempotent : calling twice replaces the previous provider.
+    NOT idempotent : OpenTelemetry's `trace.set_tracer_provider` silently
+    keeps the first provider installed (logs a warning, does NOT override).
+    Call this once at app startup. Tests that need a fresh provider must
+    install one themselves before `configure_tracing` is invoked.
     """
     resource = Resource.create(
         {
