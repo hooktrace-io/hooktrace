@@ -1,0 +1,32 @@
+app            = "webhook-inspector-worker"
+primary_region = "cdg"
+
+[build]
+  # Same Dockerfile as web/ingestor. uv installs arq into /app/.venv/bin/ and
+  # the runtime stage sets PATH so `arq` resolves.
+  dockerfile = "../../Dockerfile"
+
+[deploy]
+  strategy = "rolling"
+  # No release_command: the worker is stateless w.r.t. migrations — web's
+  # release_command = "alembic upgrade head" already runs on every push.
+
+[processes]
+  worker = "arq webhook_inspector.jobs.worker.WorkerSettings"
+
+[env]
+  ENVIRONMENT  = "prod"
+  LOG_LEVEL    = "INFO"
+  SERVICE_NAME = "webhook-inspector"
+  # No PORT — worker has no http_service block. Fly knows not to wire a
+  # public listener.
+
+# No http_service: the worker is fire-and-forget for V3. Health = "did the
+# process exit?" via Fly's process supervisor. Liveness signal for V3 is
+# the Redis queue depth metric (PR10 will add alerting on backlog > N).
+# V4 may add an HTTP /health endpoint inside the worker process if richer
+# liveness is needed.
+
+[[vm]]
+  size   = "shared-cpu-1x"
+  memory = "256mb"
