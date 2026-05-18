@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from typing import Any
 from uuid import UUID, uuid4
 
 # Avoid a hard import of the enum at module level — keep the domain entity
@@ -23,6 +24,7 @@ class CapturedRequest:
     signature_status: str | None = None
     detected_integration: str | None = None
     detected_event_type: str | None = None
+    schema_drift: dict[str, Any] | None = None
 
     @classmethod
     def create(
@@ -38,6 +40,7 @@ class CapturedRequest:
         signature_status: str = _NO_PROVIDER_VALUE,
         detected_integration: str | None = None,
         detected_event_type: str | None = None,
+        schema_drift: dict[str, Any] | None = None,
     ) -> "CapturedRequest":
         if method != method.upper():
             raise ValueError("method must be uppercase")
@@ -67,6 +70,7 @@ class CapturedRequest:
             signature_status=signature_status,
             detected_integration=detected_integration,
             detected_event_type=detected_event_type,
+            schema_drift=schema_drift,
         )
 
 
