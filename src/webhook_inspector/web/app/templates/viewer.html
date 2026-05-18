@@ -205,8 +205,21 @@
           e.target.reset();
           setTimeout(() => { status.textContent = ""; }, 3000);
         } else {
-          const txt = await resp.text();
-          status.textContent = `✗ ${resp.status}`;
+          // Surface Pydantic's validation messages so the user can fix the
+          // input — e.g. "secret must be non-empty". Fall back to the status
+          // code if the body isn't JSON.
+          let detail = `${resp.status}`;
+          try {
+            const json = await resp.json();
+            if (typeof json.detail === "string") {
+              detail = json.detail;
+            } else if (Array.isArray(json.detail)) {
+              detail = json.detail.map((d) => d.msg || JSON.stringify(d)).join("; ");
+            }
+          } catch {
+            // ignore — fallback to status code already set
+          }
+          status.textContent = `✗ ${detail}`;
           status.className = "text-xs text-rose-400";
         }
       } catch (err) {
