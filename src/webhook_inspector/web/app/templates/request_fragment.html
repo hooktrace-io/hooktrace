@@ -13,7 +13,7 @@
   <span class="text-slate-500 text-xs ml-2">{{ req.received_at }}</span>
   <span class="text-slate-500 text-xs ml-2">({{ req.body_size }} bytes)</span>
   {% if req.signature_status %}
-  {% set color = {"valid": "emerald", "invalid": "rose", "missing": "amber", "no_provider": "slate"}[req.signature_status] %}
+  {% set color = {"valid": "emerald", "invalid": "rose", "missing": "amber", "no_provider": "slate"}.get(req.signature_status, "slate") %}
   <span class="text-{{ color }}-400 text-xs">{{ req.signature_status }}</span>
   {% endif %}
 </li>
