@@ -10,6 +10,7 @@ FakeSchemaQueue.enqueued is populated by the time await client.post() returns.
 """
 
 from datetime import UTC, datetime, timedelta
+from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import httpx
@@ -20,7 +21,24 @@ from tests.fakes import FakeMetricsCollector, FakeSchemaQueue
 from webhook_inspector.config import Settings
 from webhook_inspector.domain.entities.captured_request import CapturedRequest
 from webhook_inspector.domain.entities.endpoint import Endpoint
-from webhook_inspector.web.ingestor.deps import get_metrics, get_schema_queue, get_settings
+from webhook_inspector.web.ingestor.deps import (
+    get_metrics,
+    get_schema_queue,
+    get_session,
+    get_settings,
+)
+
+
+async def _stub_session():
+    """Mock AsyncSession for tests that don't touch the DB.
+
+    The capture route now does `PostgresRequestRepository(session).update_trace_summary`
+    (PR5.4) when a trace summary is present. The stub CaptureRequest doesn't
+    create real spans, so `pop_summary` returns `[]` and update is skipped —
+    but the route still has `session: AsyncSession = Depends(get_session)`
+    which would call `_engine()` → `Settings()` without this override.
+    """
+    yield AsyncMock()
 
 
 def _stub_settings() -> Settings:
@@ -104,6 +122,7 @@ async def test_enqueue_called_when_detected_integration_is_set():
     app.dependency_overrides[get_schema_queue] = lambda: fake_queue
     app.dependency_overrides[get_metrics] = lambda: fake_metrics
     app.dependency_overrides[get_settings] = _stub_settings
+    app.dependency_overrides[get_session] = _stub_session
 
     try:
         async with httpx.AsyncClient(
@@ -141,6 +160,7 @@ async def test_enqueue_not_called_when_no_integration_detected():
     app.dependency_overrides[get_schema_queue] = lambda: fake_queue
     app.dependency_overrides[get_metrics] = lambda: fake_metrics
     app.dependency_overrides[get_settings] = _stub_settings
+    app.dependency_overrides[get_session] = _stub_session
 
     try:
         async with httpx.AsyncClient(
@@ -173,6 +193,7 @@ async def test_enqueue_failure_does_not_propagate():
     app.dependency_overrides[get_schema_queue] = lambda: fake_queue
     app.dependency_overrides[get_metrics] = lambda: fake_metrics
     app.dependency_overrides[get_settings] = _stub_settings
+    app.dependency_overrides[get_session] = _stub_session
 
     try:
         async with httpx.AsyncClient(
