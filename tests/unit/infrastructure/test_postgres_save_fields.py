@@ -7,6 +7,7 @@ handed to it, avoiding any Postgres connection.
 """
 
 from datetime import UTC, datetime
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
@@ -138,7 +139,7 @@ async def test_save_persists_none_schema_drift():
 
 
 def _make_captured_with_trace_summary(
-    trace_summary: list[dict] | None = None,
+    trace_summary: list[dict[str, Any]] | None = None,
 ) -> CapturedRequest:
     return CapturedRequest(
         id=uuid4(),
