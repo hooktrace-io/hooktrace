@@ -13,17 +13,11 @@
   <span class="text-slate-500 text-xs ml-2">{{ req.received_at }}</span>
   <span class="text-slate-500 text-xs ml-2">({{ req.body_size }} bytes)</span>
   {% if req.signature_status %}
-  {% set color = {"valid": "emerald", "invalid": "rose", "missing": "amber", "no_provider": "slate"}.get(req.signature_status, "slate") %}
+  {% set color = signature_status_colors.get(req.signature_status, "slate") %}
   <span class="text-{{ color }}-400 text-xs">{{ req.signature_status }}</span>
   {% endif %}
   {% if req.detected_integration %}
-  {# Integration colors avoid the signature_status palette (emerald/rose/amber/slate)
-     so the two badges remain visually distinct when both render on the same row. #}
-  {% set int_color = {
-      "stripe": "violet", "github": "zinc", "shopify": "green",
-      "twilio": "red", "mailgun": "sky", "discord": "indigo",
-      "slack": "yellow", "zapier": "orange", "n8n": "pink"
-  }.get(req.detected_integration, "gray") %}
+  {% set int_color = integration_colors.get(req.detected_integration, "gray") %}
   <span class="text-{{ int_color }}-400 text-xs">{{ req.detected_integration }}</span>
   {% if req.detected_event_type %}
   <span class="text-{{ int_color }}-300 text-xs">{{ req.detected_event_type }}</span>

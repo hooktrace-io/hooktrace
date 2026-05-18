@@ -29,11 +29,7 @@
     {% if aggregates %}
       <div class="space-y-4">
         {% for agg in aggregates %}
-          {% set int_color = {
-              "stripe": "violet", "github": "zinc", "shopify": "green",
-              "twilio": "red", "mailgun": "sky", "discord": "indigo",
-              "slack": "yellow", "zapier": "orange", "n8n": "pink"
-          }.get(agg.integration, "gray") %}
+          {% set int_color = integration_colors.get(agg.integration, "gray") %}
           <div class="border border-slate-700 rounded-lg p-4 bg-slate-800">
             <!-- Integration header -->
             <div class="flex items-center gap-3 mb-3">
@@ -47,14 +43,8 @@
               <!-- Signature status breakdown -->
               <div>
                 <p class="text-slate-400 text-xs uppercase tracking-wide mb-2">Signature Status</p>
-                {% set status_colors = {
-                    "valid": "emerald",
-                    "invalid": "rose",
-                    "missing": "amber",
-                    "no_provider": "slate"
-                } %}
                 {% for status, count in agg.signature_status_counts.items() %}
-                  {% set color = status_colors.get(status, "slate") %}
+                  {% set color = signature_status_colors.get(status, "slate") %}
                   <div class="flex items-center justify-between text-sm py-0.5">
                     <span class="text-{{ color }}-400">{{ status }}</span>
                     <span class="text-slate-300 tabular-nums">{{ count }}</span>

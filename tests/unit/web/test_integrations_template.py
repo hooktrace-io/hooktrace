@@ -15,10 +15,14 @@ _TEMPLATES_DIR = (
 
 
 def _env() -> Environment:
-    return Environment(
+    from webhook_inspector.web.app.template_globals import apply_globals
+
+    env = Environment(
         loader=FileSystemLoader(str(_TEMPLATES_DIR)),
         autoescape=select_autoescape(["html"]),
     )
+    apply_globals(env)
+    return env
 
 
 def _render_integrations(

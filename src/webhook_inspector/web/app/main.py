@@ -15,9 +15,11 @@ from webhook_inspector.observability.tracing import configure_tracing, instrumen
 from webhook_inspector.web._secrets_key import _validate_secrets_key
 from webhook_inspector.web.app.deps import _engine
 from webhook_inspector.web.app.routes import router
+from webhook_inspector.web.app.template_globals import apply_globals
 
 TEMPLATES_DIR = Path(__file__).parent / "templates"
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
+apply_globals(templates.env)
 
 
 @asynccontextmanager
