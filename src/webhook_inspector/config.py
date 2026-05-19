@@ -35,3 +35,4 @@ class Settings(BaseSettings):
     # paths (see web/middleware/rate_limit.py) because Settings() requires
     # database_url and module-eval is too early for test fixtures.
     rate_limit_redis_url: str | None = None
+    abuse_webhook_url: str | None = None  # Discord webhook URL; if None, abuse scan logs only
