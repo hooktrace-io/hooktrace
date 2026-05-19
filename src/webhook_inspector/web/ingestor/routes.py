@@ -18,6 +18,7 @@ from webhook_inspector.web.ingestor.deps import (
     get_session,
     get_settings,
 )
+from webhook_inspector.web.middleware.client_ip import extract_client_ip
 
 logger = logging.getLogger(__name__)
 
@@ -89,7 +90,7 @@ async def capture(
             query_string=request.url.query or None,
             headers={k.lower(): v for k, v in request.headers.items()},
             body=body,
-            source_ip=request.client.host if request.client else "0.0.0.0",
+            source_ip=extract_client_ip(request),
         )
     except EndpointNotFoundError as e:
         raise HTTPException(status_code=404, detail="endpoint not found") from e
