@@ -18,7 +18,6 @@ Covers all 13 spec branches:
 from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
-import httpx
 import pytest
 
 from tests.fakes import (
@@ -34,7 +33,10 @@ from webhook_inspector.application.use_cases.execute_forward import ExecuteForwa
 from webhook_inspector.domain.entities.captured_request import CapturedRequest
 from webhook_inspector.domain.entities.endpoint import Endpoint
 from webhook_inspector.domain.entities.forward import Forward
-from webhook_inspector.domain.ports.http_replay_target import SsrfBlockedError
+from webhook_inspector.domain.ports.http_replay_target import (
+    HttpRequestFailedError,
+    SsrfBlockedError,
+)
 from webhook_inspector.infrastructure.crypto.secrets import encrypt_secret
 
 # ---------------------------------------------------------------------------
@@ -218,7 +220,7 @@ async def test_network_error_first_attempt() -> None:
     await fwd_repo.save(fwd)
     queue = FakeForwardQueue()
     target = FakeHttpReplayTarget()
-    target.raise_on_send(httpx.ConnectError("connection refused"))
+    target.raise_on_send(HttpRequestFailedError("ConnectError: connection refused", kind="network"))
     metrics = FakeMetricsCollector()
 
     uc = _use_case(

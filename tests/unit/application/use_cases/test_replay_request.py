@@ -8,7 +8,6 @@ header stripping (auth + sig + hop-by-hop), include_headers/body=False.
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
-import httpx
 import pytest
 
 from tests.fakes import (
@@ -28,7 +27,10 @@ from webhook_inspector.application.use_cases.replay_request import (
 from webhook_inspector.domain.entities.captured_request import CapturedRequest
 from webhook_inspector.domain.entities.endpoint import Endpoint
 from webhook_inspector.domain.exceptions import EndpointNotFoundError
-from webhook_inspector.domain.ports.http_replay_target import SsrfBlockedError
+from webhook_inspector.domain.ports.http_replay_target import (
+    HttpRequestFailedError,
+    SsrfBlockedError,
+)
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -167,7 +169,7 @@ async def test_records_target_error_as_failure():
     req_repo = FakeRequestRepo(items=[req])
 
     target = FakeHttpReplayTarget()
-    target.raise_on_send(httpx.ConnectError("Connection refused"))
+    target.raise_on_send(HttpRequestFailedError("ConnectError: Connection refused", kind="network"))
 
     uc, metrics, _, replay_repo = _use_case(
         endpoint_repo=ep_repo, request_repo=req_repo, target=target

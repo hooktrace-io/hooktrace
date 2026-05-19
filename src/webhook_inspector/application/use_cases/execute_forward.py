@@ -25,15 +25,17 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from uuid import UUID
 
-import httpx
-
 from webhook_inspector.application.use_cases.forward_decision import decide
 from webhook_inspector.application.use_cases.outbound_signature import sign_forward
 from webhook_inspector.domain.ports.blob_storage import BlobStorage
 from webhook_inspector.domain.ports.endpoint_repository import EndpointRepository
 from webhook_inspector.domain.ports.forward_queue import ForwardQueue
 from webhook_inspector.domain.ports.forward_repository import ForwardRepository
-from webhook_inspector.domain.ports.http_replay_target import HttpReplayTarget, SsrfBlockedError
+from webhook_inspector.domain.ports.http_replay_target import (
+    HttpReplayTarget,
+    HttpRequestFailedError,
+    SsrfBlockedError,
+)
 from webhook_inspector.domain.ports.metrics_collector import MetricsCollector
 from webhook_inspector.domain.ports.request_repository import RequestRepository
 from webhook_inspector.domain.services.forwarded_headers import HEADERS_TO_STRIP_FROM_CAPTURED
@@ -135,9 +137,12 @@ class ExecuteForward:
             )
             self.metrics.forward_attempt(status="ssrf_blocked")
             return
-        except (httpx.HTTPError, OSError) as e:
+        except HttpRequestFailedError as e:
+            # Adapter has already translated httpx / OSError into a
+            # port-level exception; the application layer just records the
+            # failure and lets `decide()` handle the retry classification.
             network_error = True
-            final_error = f"{type(e).__name__}: {e}"
+            final_error = str(e)
 
         decision = decide(
             attempt_count=claimed.attempt_count,

@@ -14,8 +14,6 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from uuid import UUID
 
-import httpx
-
 from webhook_inspector.domain.entities.replay import (
     REPLAY_RESPONSE_BODY_PREVIEW_BYTES,
     Replay,
@@ -25,6 +23,7 @@ from webhook_inspector.domain.ports.blob_storage import BlobStorage
 from webhook_inspector.domain.ports.endpoint_repository import EndpointRepository
 from webhook_inspector.domain.ports.http_replay_target import (
     HttpReplayTarget,
+    HttpRequestFailedError,
     SsrfBlockedError,
 )
 from webhook_inspector.domain.ports.metrics_collector import MetricsCollector
@@ -135,11 +134,14 @@ class ReplayRequest:
                 now=now,
             )
             metric_status = "success" if 200 <= status_code < 300 else "target_error"
-        except (httpx.HTTPError, OSError) as e:
+        except HttpRequestFailedError as e:
+            # Adapter has already translated httpx / OSError into a
+            # port-level exception. The error string preserves the
+            # underlying type name for the audit log.
             replay = Replay.failure(
                 request_id=request_id,
                 target_url=target_url,
-                error=f"{type(e).__name__}: {e}",
+                error=str(e),
                 duration_ms=int((time.monotonic() - started) * 1000),
                 now=now,
             )

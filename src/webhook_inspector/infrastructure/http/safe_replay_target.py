@@ -15,6 +15,7 @@ import httpx
 
 from webhook_inspector.domain.ports.http_replay_target import (
     HttpReplayTarget,
+    HttpRequestFailedError,
     SsrfBlockedError,
     ValidatedTarget,
 )
@@ -114,24 +115,42 @@ class SafeReplayTarget(HttpReplayTarget):
         private one, bypassing the entire SSRF guard. Do not flip without
         re-validating each redirect hop.
         """
-        async with httpx.AsyncClient(
-            timeout=httpx.Timeout(self._timeout),
-            follow_redirects=False,
-            limits=httpx.Limits(max_connections=10),
-        ) as client:
-            resp = await client.request(
-                method=method,
-                url=validated.url,
-                headers=headers,
-                content=body,
-            )
-            body_out = bytearray()
-            async for chunk in resp.aiter_bytes(chunk_size=8192):
-                body_out.extend(chunk)
-                if len(body_out) >= self._max_response_bytes:
-                    body_out = body_out[: self._max_response_bytes]
-                    break
-            return resp.status_code, dict(resp.headers), bytes(body_out)
+        try:
+            async with httpx.AsyncClient(
+                timeout=httpx.Timeout(self._timeout),
+                follow_redirects=False,
+                limits=httpx.Limits(max_connections=10),
+            ) as client:
+                resp = await client.request(
+                    method=method,
+                    url=validated.url,
+                    headers=headers,
+                    content=body,
+                )
+                body_out = bytearray()
+                async for chunk in resp.aiter_bytes(chunk_size=8192):
+                    body_out.extend(chunk)
+                    if len(body_out) >= self._max_response_bytes:
+                        body_out = body_out[: self._max_response_bytes]
+                        break
+                return resp.status_code, dict(resp.headers), bytes(body_out)
+        except httpx.TimeoutException as exc:
+            # Translate httpx's exception hierarchy into a port-level error
+            # so callers in the application layer never import httpx.
+            raise HttpRequestFailedError(
+                f"{type(exc).__name__}: {exc}",
+                kind="timeout",
+            ) from exc
+        except httpx.HTTPError as exc:
+            raise HttpRequestFailedError(
+                f"{type(exc).__name__}: {exc}",
+                kind="network",
+            ) from exc
+        except OSError as exc:
+            raise HttpRequestFailedError(
+                f"{type(exc).__name__}: {exc}",
+                kind="network",
+            ) from exc
 
 
 def make_safe_replay_target() -> SafeReplayTarget:

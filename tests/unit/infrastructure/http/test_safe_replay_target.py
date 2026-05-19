@@ -4,6 +4,7 @@ import pytest
 import respx
 
 from webhook_inspector.domain.ports.http_replay_target import (
+    HttpRequestFailedError,
     SsrfBlockedError,
     ValidatedTarget,
 )
@@ -235,3 +236,45 @@ async def test_send_does_not_follow_redirects() -> None:
             body=b"",
         )
     assert status == 301  # NOT 200 — redirect not followed
+
+
+@pytest.mark.asyncio
+async def test_send_translates_httpx_connect_error_to_port_exception() -> None:
+    """httpx.ConnectError must surface as HttpRequestFailedError(kind="network")
+    so the application layer never has to import httpx."""
+    import httpx
+
+    tgt = SafeReplayTarget()
+    validated = ValidatedTarget(
+        url="https://example.com/webhook",
+        host="example.com",
+        port=443,
+        ip="93.184.216.34",
+    )
+    with respx.mock(base_url="https://example.com") as respx_mock:
+        respx_mock.post("/webhook").mock(side_effect=httpx.ConnectError("Connection refused"))
+        with pytest.raises(HttpRequestFailedError) as exc_info:
+            await tgt.send(method="POST", validated=validated, headers={}, body=b"")
+
+    assert exc_info.value.kind == "network"
+    assert "ConnectError" in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_send_translates_httpx_timeout_to_port_exception_with_kind_timeout() -> None:
+    """httpx.TimeoutException must surface as HttpRequestFailedError(kind="timeout")."""
+    import httpx
+
+    tgt = SafeReplayTarget()
+    validated = ValidatedTarget(
+        url="https://example.com/webhook",
+        host="example.com",
+        port=443,
+        ip="93.184.216.34",
+    )
+    with respx.mock(base_url="https://example.com") as respx_mock:
+        respx_mock.post("/webhook").mock(side_effect=httpx.ReadTimeout("slow target"))
+        with pytest.raises(HttpRequestFailedError) as exc_info:
+            await tgt.send(method="POST", validated=validated, headers={}, body=b"")
+
+    assert exc_info.value.kind == "timeout"
