@@ -71,4 +71,4 @@ This file is loaded automatically by Claude Code when working in this repo. It d
 
 ## Roadmap
 
-See README. Current state: **V2.6** — migrated from GCP Cloud Run + Cloud SQL to Fly.io + self-managed Postgres + Cloudflare R2 (2026-05). Phase -1 (brand cleanup `odessa-inspect.org` → `hooktrace.io`) done 2026-05-16. Next: V3 observability pivot.
+See README. Current state: **V3 Phase 0 shipped** (2026-05-19) — HMAC validation for 9 services, replay with SSRF guard, per-integration view, forward + retry + DLQ (Upstash Redis + arq worker app), anti-abuse (rate limits + slug denylist + phishing heuristic + Discord notifications), retention bumped 7→30 days, ToS at `/tos`, integration docs at `/docs/integrations`. F4 (schema drift) and F7 (OTEL timeline UI) dropped as low product value. F6 (JSONata transforms) deferred to V4. Next: ops prep (Fly secrets, Cloudflare WAF, R2 lifecycle rule) → Phase 1 customer discovery → soft launch.
