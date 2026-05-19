@@ -1,19 +1,12 @@
-from typing import Literal
-
 from pydantic import BaseModel, Field, HttpUrl
 
-# Tied to the registry in get_validator(). Adding a 10th provider = update both.
-SignatureProvider = Literal[
-    "stripe",
-    "github",
-    "shopify",
-    "twilio",
-    "mailgun",
-    "discord",
-    "slack",
-    "zapier",
-    "n8n",
-]
+from webhook_inspector.domain.services.integration_detector import IntegrationName
+
+# Re-exported under its old name so callers that imported `SignatureProvider`
+# don't have to change. The set of supported providers is the same set as the
+# 9 detected integrations (1:1 with hmac.factory._VALIDATORS), so the type
+# alias from the domain layer is the single source of truth.
+SignatureProvider = IntegrationName
 
 
 class SignatureConfig(BaseModel):

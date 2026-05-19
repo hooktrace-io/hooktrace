@@ -52,6 +52,7 @@ from webhook_inspector.domain.entities.endpoint import (
 from webhook_inspector.domain.entities.forward import Forward
 from webhook_inspector.domain.exceptions import EndpointValidationError, SlugAlreadyTakenError
 from webhook_inspector.domain.services.hmac.base import ValidationResult
+from webhook_inspector.domain.services.integration_detector import IntegrationName
 from webhook_inspector.infrastructure.notifications.postgres_notifier import PostgresNotifier
 from webhook_inspector.web.app.deps import (
     _session_factory,
@@ -221,17 +222,7 @@ async def update_config(
 
 
 class IntegrationAggregateResponse(BaseModel):
-    integration: Literal[
-        "stripe",
-        "github",
-        "shopify",
-        "twilio",
-        "mailgun",
-        "discord",
-        "slack",
-        "zapier",
-        "n8n",
-    ]
+    integration: IntegrationName
     total: int
     event_types: dict[str, int]
     signature_status_counts: dict[str, int]
@@ -277,20 +268,7 @@ class RequestItem(BaseModel):
         ]
         | None
     ) = None
-    detected_integration: (
-        Literal[
-            "stripe",
-            "github",
-            "shopify",
-            "twilio",
-            "mailgun",
-            "discord",
-            "slack",
-            "zapier",
-            "n8n",
-        ]
-        | None
-    ) = None
+    detected_integration: IntegrationName | None = None
     detected_event_type: str | None = None
 
 
