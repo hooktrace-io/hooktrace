@@ -13,6 +13,7 @@ jobs:
       - uses: astral-sh/setup-uv@v7
         with:
           python-version: "3.13"
+          enable-cache: true
       - run: uv sync --frozen
       - run: uv run ruff check src tests
       - run: uv run ruff format --check src tests
@@ -24,6 +25,7 @@ jobs:
       - uses: astral-sh/setup-uv@v7
         with:
           python-version: "3.13"
+          enable-cache: true
       - run: uv sync --frozen
       - run: uv run mypy src
 
@@ -34,6 +36,7 @@ jobs:
       - uses: astral-sh/setup-uv@v7
         with:
           python-version: "3.13"
+          enable-cache: true
       - run: uv sync --frozen
       # Coverage scoped to domain + application — the layers that SHOULD be
       # unit-tested. Infra + web are integration-tested with testcontainers in
@@ -51,5 +54,6 @@ jobs:
       - uses: astral-sh/setup-uv@v7
         with:
           python-version: "3.13"
+          enable-cache: true
       - run: uv sync --frozen
       - run: uv run pytest tests/integration -v

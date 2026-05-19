@@ -1,0 +1,66 @@
+name: trivy
+
+# Scan the prod Docker image for OS + Python library CVEs. On PRs we only
+# trigger when something that affects the image changes (Dockerfile, deps,
+# the workflow itself). On main we run unconditionally. Weekly schedule
+# catches new CVEs against already-deployed images.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+    paths:
+      - "Dockerfile"
+      - "pyproject.toml"
+      - "uv.lock"
+      - ".github/workflows/trivy.yml"
+  schedule:
+    - cron: "0 6 * * 1"  # Monday 06:00 UTC — before the working week starts
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Build prod image
+        run: docker build -t hooktrace-scan:${{ github.sha }} .
+
+      - name: Trivy vulnerability scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: hooktrace-scan:${{ github.sha }}
+          format: sarif
+          output: trivy-results.sarif
+          severity: HIGH,CRITICAL
+          # exit-code=0 for now — initial CVE triage TBD in a follow-up PR.
+          # The current Python base image carries fixed-but-unfixed-by-us
+          # CVEs (we'd need to bump python:3.13-slim or pin specific patches).
+          # We keep findings visible in the Security tab and the log (next
+          # step), then iterate on the gate threshold once the baseline is
+          # clean.
+          exit-code: "0"
+          ignore-unfixed: true
+          cache: "true"
+
+      - name: Summarize findings in the log
+        if: always()
+        run: |
+          if [ -f trivy-results.sarif ]; then
+            COUNT=$(jq '.runs[0].results | length' trivy-results.sarif)
+            echo "::notice::Trivy reported $COUNT HIGH/CRITICAL findings with fix available."
+            jq -r '.runs[0].results[] | "  \(.ruleId)  \(.message.text)"' trivy-results.sarif | head -30 || true
+          fi
+
+      - name: Upload SARIF to GitHub Security tab
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-results.sarif
+          category: trivy
