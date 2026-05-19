@@ -625,6 +625,21 @@ async def landing(request: Request) -> HTMLResponse:
     )
 
 
+@router.get("/tos", response_class=HTMLResponse)
+async def tos_view(request: Request) -> HTMLResponse:
+    """Minimal Terms of Service. Static HTML — no auth, no DB read.
+
+    Declared BEFORE the catch-all `/{token}` route below so FastAPI matches
+    the literal path first ; `/tos` would otherwise be parsed as a token
+    and 404'd by the viewer.
+    """
+    templates = request.app.state.templates
+    return cast(
+        HTMLResponse,
+        templates.TemplateResponse(request=request, name="tos.html", context={}),
+    )
+
+
 @router.get("/{token}/integrations", response_class=HTMLResponse)
 async def integrations_view(
     token: str,

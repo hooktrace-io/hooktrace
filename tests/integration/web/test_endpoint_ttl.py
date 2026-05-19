@@ -73,3 +73,23 @@ async def test_existing_endpoint_keeps_original_ttl(session, app_client):
         {"t": token},
     )
     await session.commit()
+
+
+async def test_tos_route_returns_html(app_client):
+    """V3 launch-prep PR11: /tos returns the minimal Terms of Service page.
+
+    Asserts that the 30-day retention statement (the core promise) is present
+    in the rendered body — otherwise a future template edit could quietly
+    drop the contract.
+    """
+    resp = await app_client.get("/tos")
+    assert resp.status_code == 200
+    assert "text/html" in resp.headers["content-type"]
+    assert "30 days" in resp.text
+
+
+async def test_landing_links_to_tos(app_client):
+    """The footer must link to /tos so users can find it without typing the path."""
+    resp = await app_client.get("/")
+    assert resp.status_code == 200
+    assert 'href="/tos"' in resp.text
