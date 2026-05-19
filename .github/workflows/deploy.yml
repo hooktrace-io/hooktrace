@@ -25,6 +25,9 @@ jobs:
       - name: Deploy ingestor
         run: flyctl deploy --remote-only --config infra/fly/ingestor.fly.toml
 
+      - name: Deploy worker (arq job runner + abuse_scan cron)
+        run: flyctl deploy --remote-only --config infra/fly/worker.fly.toml
+
       - name: Smoke test
         run: |
           set -e
