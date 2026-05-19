@@ -39,3 +39,21 @@ async def test_viewer_404_for_unknown_token(monkeypatch, database_url, engine, t
     ) as c:
         resp = await c.get("/totally-unknown-token-here")
         assert resp.status_code == 404
+
+
+async def test_viewer_shows_expiry_countdown(app_client):
+    """V3 launch-prep PR11: countdown badge in viewer header.
+
+    A brand-new endpoint = 30-day TTL, so the badge reads "Expires in 30 days".
+    Color coding (slate ≥7d, amber-400 <7d, rose-400 <1d) is asserted by the
+    presence of `text-slate-500` for a fresh endpoint.
+    """
+    resp = await app_client.post("/api/endpoints", json={})
+    token = resp.json()["token"]
+    viewer = await app_client.get(f"/{token}")
+    assert viewer.status_code == 200
+    # New endpoint with default 30-day TTL.
+    assert "Expires in" in viewer.text
+    assert "30 day" in viewer.text  # tolerates "30 days"
+    # >=7d → slate color, NOT amber/rose.
+    assert "text-slate-500" in viewer.text

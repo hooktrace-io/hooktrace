@@ -3,14 +3,19 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>hooktrace — Webhook observability with capture, debug, replay</title>
-  <meta name="description" content="Free webhook inspection: generate a URL, point any webhook at it, see requests in real-time. No signup, URLs expire after 7 days.">
+  <title>hooktrace — Free observability layer for webhooks</title>
+  <meta name="description" content="Capture, validate HMAC signatures (Stripe, GitHub, Shopify, …), replay to localhost, forward with retry &amp; DLQ. Free, no signup, anonymous URLs. Open source.">
 
   <!-- Open Graph / social sharing -->
-  <meta property="og:title" content="hooktrace">
-  <meta property="og:description" content="Generate a URL, point any webhook at it, see requests live in your browser. Free, no signup.">
+  <meta property="og:title" content="hooktrace — Free observability layer for webhooks">
+  <meta property="og:description" content="HMAC validation built-in for 9 services. Replay to any URL. Forward with retry + DLQ. No signup.">
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://app.hooktrace.io/">
+
+  <!-- Twitter card -->
+  <meta name="twitter:card" content="summary">
+  <meta name="twitter:title" content="hooktrace">
+  <meta name="twitter:description" content="Free observability layer for webhooks: HMAC validation, replay, forward + DLQ.">
 
   <script src="https://unpkg.com/htmx.org@2.0.4"></script>
   <script src="https://cdn.tailwindcss.com"></script>
@@ -19,14 +24,28 @@
 
   <main class="max-w-2xl mx-auto px-6 py-16">
 
+    <div class="flex justify-end mb-4">
+      <a href="https://github.com/hooktrace-io/hooktrace"
+         class="inline-flex items-center gap-2 bg-slate-800 hover:bg-slate-700 text-slate-300 text-sm font-mono px-3 py-1.5 rounded transition-colors"
+         target="_blank" rel="noopener">
+        <svg class="w-4 h-4" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+          <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z"/>
+        </svg>
+        <span>GitHub</span>
+      </a>
+    </div>
+
     <header class="mb-12">
       <h1 class="text-3xl font-bold text-emerald-400 mb-3">hooktrace</h1>
-      <p class="text-slate-300 text-lg leading-relaxed">
-        Generate a URL, point any webhook at it,<br>
-        inspect the requests live in your browser.
+      <p class="text-slate-300 text-xl leading-relaxed mb-4">
+        The free observability layer for webhooks.
       </p>
-      <p class="text-slate-500 text-sm mt-3">
-        Free. No signup. URLs expire after 7 days.
+      <p class="text-slate-400 text-base leading-relaxed">
+        Capture, validate signatures, replay, forward with retry — all from one anonymous URL.
+        No signup. From localhost to production.
+      </p>
+      <p class="text-slate-500 text-sm mt-4">
+        Free. No signup. Endpoints and all their data (captured requests, forwards, replays) are deleted 30 days after creation.
       </p>
     </header>
 
@@ -125,31 +144,92 @@
     </script>
 
     <section class="mb-12">
+      <h2 class="text-slate-400 text-sm uppercase tracking-wider mb-4">What you get</h2>
+      <div class="space-y-4">
+
+        <div class="bg-slate-800 rounded p-4">
+          <h3 class="text-emerald-400 font-bold mb-1">HMAC signature validation</h3>
+          <p class="text-slate-300 text-sm mb-2">
+            Configure your Stripe / GitHub / Shopify / Twilio / Mailgun / Discord / Slack /
+            Zapier / n8n secret once, see a green or red pastille next to every captured request.
+            9 services supported out of the box.
+          </p>
+          <pre class="text-slate-400 text-xs bg-slate-900 rounded px-2 py-1 overflow-x-auto"><code>POST /h/AbCdEf   Stripe-Signature: t=1715954400,v1=...   <span class="text-emerald-400">&check; valid</span>
+POST /h/AbCdEf   Stripe-Signature: t=1715954500,v1=...   <span class="text-rose-400">&cross; invalid</span></code></pre>
+        </div>
+
+        <div class="bg-slate-800 rounded p-4">
+          <h3 class="text-emerald-400 font-bold mb-1">Per-integration view</h3>
+          <p class="text-slate-300 text-sm mb-2">
+            Auto-detects Stripe / GitHub / Shopify / Twilio / Mailgun / Discord / Slack /
+            Zapier / n8n from headers. One click to filter; counters and signature error
+            rate per integration.
+          </p>
+          <pre class="text-slate-400 text-xs bg-slate-900 rounded px-2 py-1 overflow-x-auto"><code>stripe    47 requests   2 signature errors   p95 ~120ms
+github    13 requests   0 signature errors   p95  ~80ms</code></pre>
+        </div>
+
+        <div class="bg-slate-800 rounded p-4">
+          <h3 class="text-emerald-400 font-bold mb-1">Replay to localhost</h3>
+          <p class="text-slate-300 text-sm mb-2">
+            Click any captured request, point it at your <code>localhost:3000</code>
+            (or any URL), reproduce a bug in 5 seconds. SSRF-guarded — private ranges
+            blocked unless explicitly allowed.
+          </p>
+          <pre class="text-slate-400 text-xs bg-slate-900 rounded px-2 py-1 overflow-x-auto"><code>replay req_7f3c → POST http://localhost:3000/webhooks/stripe
+                  200 OK   42ms</code></pre>
+        </div>
+
+        <div class="bg-slate-800 rounded p-4">
+          <h3 class="text-emerald-400 font-bold mb-1">Forward with retry &amp; DLQ</h3>
+          <p class="text-slate-300 text-sm mb-2">
+            Relay every webhook to your prod backend with exponential retry
+            (up to 5 attempts: 30s &rarr; 2m &rarr; 10m &rarr; 1h between retries),
+            HMAC-SHA256 signature (Stripe-compatible <code>t=,v1=</code>),
+            and a DLQ to retry or abandon failed deliveries.
+          </p>
+          <pre class="text-slate-400 text-xs bg-slate-900 rounded px-2 py-1 overflow-x-auto"><code>&rarr; POST https://api.your-backend.com/webhook
+   X-Hooktrace-Signature: t=...,v1=...
+   Idempotency-Key: 7f3c-...:1</code></pre>
+        </div>
+
+      </div>
+    </section>
+
+    <section class="mb-12">
       <h2 class="text-slate-400 text-sm uppercase tracking-wider mb-4">Use cases</h2>
       <ul class="space-y-2 text-slate-300 text-sm">
-        <li>&middot; Test Stripe / GitHub / Slack webhooks without spinning up a server</li>
-        <li>&middot; Debug what a service POSTs (headers, body, method, IP)</li>
-        <li>&middot; Replace ngrok for one-off captures</li>
-        <li>&middot; Share a URL with a teammate to see traffic in real-time</li>
+        <li>&middot; Debug Stripe / GitHub / Shopify webhooks — instantly see if the HMAC signature matches your secret</li>
+        <li>&middot; Reproduce a webhook bug locally — replay a captured request to your <code>localhost:3000</code></li>
+        <li>&middot; Bridge a dev webhook source to a staging backend with retry + DLQ</li>
+        <li>&middot; Share a URL with a teammate to see incoming traffic in real-time</li>
       </ul>
     </section>
 
     <section class="mb-12 bg-slate-800 rounded p-4 text-sm">
-      <h2 class="text-slate-400 text-xs uppercase tracking-wider mb-2">Quick example</h2>
-      <pre class="text-slate-300 overflow-x-auto"><code># 1. Click the button above. You get a URL like:
+      <h2 class="text-slate-400 text-xs uppercase tracking-wider mb-2">Quick start</h2>
+      <pre class="text-slate-300 overflow-x-auto"><code># 1. Click "Create a webhook URL" above. Get something like:
 #    https://hook.hooktrace.io/h/AbCdEf...
 
-# 2. Use that URL anywhere webhooks are sent. Or curl it:
+# 2. Point Stripe (or anything) at it:
 curl -X POST -d '{"hello":"world"}' \
+  -H 'Stripe-Signature: t=1715954400,v1=...' \
   https://hook.hooktrace.io/h/AbCdEf...
 
-# 3. The browser tab shows the request, live.</code></pre>
+# 3. The browser tab shows the request, live — with a green
+#    or red pastille indicating signature validity (once you
+#    configure your secret in the viewer's Settings panel).</code></pre>
     </section>
 
-    <footer class="text-slate-500 text-xs border-t border-slate-700 pt-4">
+    <footer class="text-slate-500 text-xs border-t border-slate-700 pt-4 space-y-1">
       <p>
         Built with FastAPI + Fly.io +
         <a href="https://github.com/hooktrace-io/hooktrace" class="text-emerald-400 hover:underline">open source</a>.
+      </p>
+      <p>
+        <a href="/tos" class="hover:text-slate-400">Terms of Service</a>
+        <span class="mx-2">&middot;</span>
+        <a href="/docs/integrations" class="hover:text-slate-400">Integration guides</a>
       </p>
     </footer>
 

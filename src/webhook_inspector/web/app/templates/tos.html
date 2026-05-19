@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>hooktrace &mdash; Terms of Service</title>
+  <meta name="description" content="Terms of Service for hooktrace: free webhook inspection, 30-day retention, acceptable use.">
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-900 text-slate-100 min-h-screen font-mono">
+
+  <main class="max-w-2xl mx-auto px-6 py-16">
+
+    <header class="mb-8">
+      <h1 class="text-3xl font-bold text-emerald-400 mb-2">Terms of Service</h1>
+      <p class="text-slate-500 text-xs">Effective 2026-05-19.</p>
+    </header>
+
+    <section class="mb-8">
+      <h2 class="text-slate-400 text-sm uppercase tracking-wider mb-2">1. Service, as-is</h2>
+      <p class="text-slate-300 text-sm leading-relaxed">
+        hooktrace is provided free of charge and "as is", without any uptime
+        commitment, SLA, or warranty. It is a side project run by a single
+        operator. Maintenance windows and outages happen without notice.
+      </p>
+    </section>
+
+    <section class="mb-8">
+      <h2 class="text-slate-400 text-sm uppercase tracking-wider mb-2">2. Data retention</h2>
+      <p class="text-slate-300 text-sm leading-relaxed">
+        Endpoints and all data attached to them &mdash; captured requests,
+        forward configurations and history, replays, signature secrets &mdash;
+        are deleted automatically 30 days after the endpoint is created. There
+        are no backups and no recovery path once data is deleted. Export what
+        you need (Export JSON button in the viewer) before the deadline.
+      </p>
+      <p class="text-slate-300 text-sm leading-relaxed mt-2">
+        Object storage (request bodies above the inline threshold) has its own
+        lifecycle rule that deletes objects older than 31 days. Treat the
+        30-day endpoint TTL as the contract.
+      </p>
+    </section>
+
+    <section class="mb-8">
+      <h2 class="text-slate-400 text-sm uppercase tracking-wider mb-2">3. Acceptable use</h2>
+      <p class="text-slate-300 text-sm leading-relaxed">
+        Endpoints must not be used to:
+      </p>
+      <ul class="text-slate-300 text-sm leading-relaxed list-disc pl-6 mt-2 space-y-1">
+        <li>Phish credentials, collect login forms, or impersonate other services.</li>
+        <li>Send spam or relay unsolicited mail (no SMTP-relay / open-proxy abuse via the forward feature).</li>
+        <li>Capture personally-identifiable information you are not authorized to handle.</li>
+        <li>Run automated load tests beyond a few requests per second sustained.</li>
+      </ul>
+      <p class="text-slate-300 text-sm leading-relaxed mt-2">
+        Suspected abuse triggers manual review by the operator. Flagged endpoints
+        keep the standard 30-day retention; they are <strong>not</strong>
+        auto-frozen. The operator reserves the right to delete or rate-limit
+        any endpoint at any time.
+      </p>
+    </section>
+
+    <section class="mb-8">
+      <h2 class="text-slate-400 text-sm uppercase tracking-wider mb-2">4. Liability</h2>
+      <p class="text-slate-300 text-sm leading-relaxed">
+        Liability is capped at zero. hooktrace is free and best-effort. You
+        accept full responsibility for the data you route through it and for
+        any consequences of using it for production workflows.
+      </p>
+    </section>
+
+    <section class="mb-8">
+      <h2 class="text-slate-400 text-sm uppercase tracking-wider mb-2">5. Contact</h2>
+      <p class="text-slate-300 text-sm leading-relaxed">
+        Abuse reports and operator contact:
+        <!-- TODO(launch-ops): switch to abuse@hooktrace.io once that alias is provisioned. -->
+        <a href="mailto:support@hooktrace.io" class="text-emerald-400 hover:underline">support@hooktrace.io</a>.
+      </p>
+    </section>
+
+    <footer class="text-slate-500 text-xs border-t border-slate-700 pt-4">
+      <p>
+        <a href="/" class="text-emerald-400 hover:underline">&larr; back to hooktrace</a>
+      </p>
+    </footer>
+
+  </main>
+
+</body>
+</html>

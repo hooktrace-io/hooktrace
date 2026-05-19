@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import (
 from webhook_inspector.application.use_cases.abandon_forward import AbandonForward
 from webhook_inspector.application.use_cases.create_endpoint import CreateEndpoint
 from webhook_inspector.application.use_cases.export_requests import ExportRequests
+from webhook_inspector.application.use_cases.get_endpoint import GetEndpoint
 from webhook_inspector.application.use_cases.get_forward_stats import GetForwardStats
 from webhook_inspector.application.use_cases.list_forwards import ListForwards
 from webhook_inspector.application.use_cases.list_integrations import ListIntegrations
@@ -115,6 +116,12 @@ async def get_list_requests(
         endpoint_repo=PostgresEndpointRepository(session),
         request_repo=PostgresRequestRepository(session),
     )
+
+
+async def get_endpoint_use_case(
+    session: AsyncSession = Depends(get_session),  # noqa: B008
+) -> GetEndpoint:
+    return GetEndpoint(endpoint_repo=PostgresEndpointRepository(session))
 
 
 async def get_export_requests(

@@ -102,6 +102,7 @@ def test_viewer_html_has_integrations_link():
     html = template.render(
         token="tok123",
         hook_url="http://hook.test/h/tok123",
+        days_until_expiry=30,
         initial_requests=[],
     )
     assert "/integrations" in html or "integrations" in html.lower()

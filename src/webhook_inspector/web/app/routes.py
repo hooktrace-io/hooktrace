@@ -1,9 +1,12 @@
 import re
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
+from math import ceil
+from pathlib import Path
 from typing import Annotated, Literal, cast
 from uuid import UUID
 
+import markdown
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field, HttpUrl
@@ -19,6 +22,7 @@ from webhook_inspector.application.use_cases.export_requests import (
     ExportRequests,
     ExportTooLargeError,
 )
+from webhook_inspector.application.use_cases.get_endpoint import GetEndpoint
 from webhook_inspector.application.use_cases.get_forward_stats import GetForwardStats
 from webhook_inspector.application.use_cases.list_forwards import ListForwards
 from webhook_inspector.application.use_cases.list_integrations import ListIntegrations
@@ -53,6 +57,7 @@ from webhook_inspector.web.app.deps import (
     _session_factory,
     get_abandon_forward,
     get_create_endpoint,
+    get_endpoint_use_case,
     get_export_requests,
     get_forward_stats_use_case,
     get_list_forwards,
@@ -622,6 +627,127 @@ async def landing(request: Request) -> HTMLResponse:
     )
 
 
+@router.get("/tos", response_class=HTMLResponse)
+async def tos_view(request: Request) -> HTMLResponse:
+    """Minimal Terms of Service. Static HTML — no auth, no DB read.
+
+    Declared BEFORE the catch-all `/{token}` route below so FastAPI matches
+    the literal path first ; `/tos` would otherwise be parsed as a token
+    and 404'd by the viewer.
+    """
+    templates = request.app.state.templates
+    return cast(
+        HTMLResponse,
+        templates.TemplateResponse(request=request, name="tos.html", context={}),
+    )
+
+
+# Public integration docs (PR13). The .md files ship inside the package
+# (src/webhook_inspector/docs/integrations/) so the path resolves identically
+# in editable dev installs and in production wheel installs — no Dockerfile
+# tweak or env var needed.
+_DOCS_ROOT: Path = Path(__file__).resolve().parent.parent.parent / "docs" / "integrations"
+
+# Closed allowlist for slug → file. Validated against this frozen set BEFORE
+# any filesystem access — never path-joined directly with user input. Adding
+# a new service requires editing both this set and the matching .md file.
+_ALLOWED_DOCS: frozenset[str] = frozenset(
+    {
+        "stripe",
+        "github",
+        "shopify",
+        "twilio",
+        "mailgun",
+        "discord",
+        "slack",
+        "zapier",
+        "n8n",
+        "verifying-forwards",
+    }
+)
+
+_DOC_TITLES: dict[str, str] = {
+    "stripe": "Stripe webhooks",
+    "github": "GitHub webhooks",
+    "shopify": "Shopify webhooks",
+    "twilio": "Twilio webhooks",
+    "mailgun": "Mailgun webhooks",
+    "discord": "Discord webhooks",
+    "slack": "Slack webhooks",
+    "zapier": "Zapier webhooks",
+    "n8n": "n8n webhooks",
+    "verifying-forwards": "Verifying hooktrace forwards",
+}
+
+
+def _render_doc_markdown(md_path: Path) -> str:
+    """Render a markdown file to HTML. Pure I/O + markdown call.
+
+    The `markdown` package is untyped (no published stubs at the version we
+    pin), so `markdown.markdown(...)` is `Any`. Cast to str at the boundary
+    to keep callers strictly typed without sprinkling `cast(..)` further up.
+    """
+    text_md = md_path.read_text(encoding="utf-8")
+    return cast(str, markdown.markdown(text_md, extensions=["fenced_code", "tables"]))
+
+
+@router.get("/docs/integrations", response_class=HTMLResponse)
+async def docs_integrations_index(request: Request) -> HTMLResponse:
+    """Public landing for the integration guides. Renders README.md."""
+    index_path = _DOCS_ROOT / "README.md"
+    rendered = _render_doc_markdown(index_path)
+    templates = request.app.state.templates
+    return cast(
+        HTMLResponse,
+        templates.TemplateResponse(
+            request=request,
+            name="docs.html",
+            context={
+                "title": "Integration guides",
+                "description": (
+                    "HMAC signature schemes hooktrace validates for Stripe, GitHub, "
+                    "Shopify, Twilio, Mailgun, Discord, Slack, Zapier, n8n, plus the "
+                    "verifying-forwards public contract."
+                ),
+                "slug": None,
+                "content": rendered,
+            },
+        ),
+    )
+
+
+@router.get("/docs/integrations/{slug}", response_class=HTMLResponse)
+async def docs_integration_page(slug: str, request: Request) -> HTMLResponse:
+    """Render one integration doc by slug.
+
+    The slug is validated against `_ALLOWED_DOCS` — a frozen set of the 10
+    known doc names. Anything outside the set returns 404. We never join the
+    raw slug onto a filesystem path, so path traversal (`../etc/passwd`,
+    URL-encoded `..`, etc.) cannot escape `_DOCS_ROOT`.
+    """
+    if slug not in _ALLOWED_DOCS:
+        raise HTTPException(status_code=404, detail="doc not found")
+
+    md_path = _DOCS_ROOT / f"{slug}.md"
+    rendered = _render_doc_markdown(md_path)
+
+    title = _DOC_TITLES.get(slug, slug)
+    templates = request.app.state.templates
+    return cast(
+        HTMLResponse,
+        templates.TemplateResponse(
+            request=request,
+            name="docs.html",
+            context={
+                "title": title,
+                "description": f"{title} — what hooktrace validates and where to find the secret.",
+                "slug": slug,
+                "content": rendered,
+            },
+        ),
+    )
+
+
 @router.get("/{token}/integrations", response_class=HTMLResponse)
 async def integrations_view(
     token: str,
@@ -687,11 +813,24 @@ async def viewer(
     token: str,
     request: Request,
     use_case: ListRequests = Depends(get_list_requests),  # noqa: B008
+    get_endpoint: GetEndpoint = Depends(get_endpoint_use_case),  # noqa: B008
 ) -> HTMLResponse:
     try:
+        endpoint = await get_endpoint.execute(token=token)
         initial = await use_case.execute(token=token, limit=50)
     except EndpointNotFoundError as e:
         raise HTTPException(status_code=404, detail="endpoint not found") from e
+
+    # Countdown badge: ceil so 23h59 still reads "1 day", clamp to 0 so an
+    # expires_at in the past (cleaner hasn't run yet) shows "Expires today"
+    # rather than a negative number. Postgres TIMESTAMP WITHOUT TIME ZONE
+    # returns a naive datetime ; we treat stored values as UTC (matches what
+    # CreateEndpoint persists via datetime.now(UTC)).
+    expires_at = endpoint.expires_at
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=UTC)
+    delta = expires_at - datetime.now(UTC)
+    days_until_expiry = max(0, ceil(delta.total_seconds() / 86400))
 
     templates = request.app.state.templates
     return cast(
@@ -702,6 +841,7 @@ async def viewer(
             context={
                 "token": token,
                 "hook_url": f"{hook_base_url(request)}/h/{token}",
+                "days_until_expiry": days_until_expiry,
                 "initial_requests": [
                     {
                         "id": str(r.id),
