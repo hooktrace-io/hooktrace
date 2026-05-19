@@ -151,6 +151,15 @@ class SafeReplayTarget(HttpReplayTarget):
                 f"{type(exc).__name__}: {exc}",
                 kind="network",
             ) from exc
+        except Exception as exc:
+            # Belt-and-braces: any unexpected exception from httpx (or a future
+            # transport plugin we don't know about) gets wrapped as kind="other"
+            # so the application layer never sees a non-port exception. This
+            # honors the contract in HttpRequestFailedError's docstring.
+            raise HttpRequestFailedError(
+                f"{type(exc).__name__}: {exc}",
+                kind="other",
+            ) from exc
 
 
 def make_safe_replay_target() -> SafeReplayTarget:
