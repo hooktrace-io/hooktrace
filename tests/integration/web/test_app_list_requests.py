@@ -39,6 +39,34 @@ async def test_list_unknown_token_returns_404(monkeypatch, database_url, engine,
         assert resp.status_code == 404
 
 
+async def test_list_requests_rejects_limit_out_of_range(
+    monkeypatch, database_url, engine, tmp_path
+):
+    """limit query param is bounded [LIST_LIMIT_MIN, LIST_LIMIT_MAX]. Out-of-range
+    surfaces as 422 (FastAPI Query validation), not 500 / unbounded query."""
+    monkeypatch.setenv("DATABASE_URL", database_url.replace("+psycopg_async", "+psycopg"))
+    monkeypatch.setenv("BLOB_STORAGE_PATH", str(tmp_path))
+    from webhook_inspector.web.app import deps
+
+    deps.get_settings.cache_clear()
+    deps._engine.cache_clear()
+    deps._session_factory.cache_clear()
+
+    async with httpx.AsyncClient(
+        transport=ASGITransport(app=app_service), base_url="http://test"
+    ) as c:
+        token = (await c.post("/api/endpoints")).json()["token"]
+        # Too small
+        resp = await c.get(f"/api/endpoints/{token}/requests?limit=0")
+        assert resp.status_code == 422
+        # Too large
+        resp = await c.get(f"/api/endpoints/{token}/requests?limit=10000")
+        assert resp.status_code == 422
+        # And the fragment route is bounded too
+        resp = await c.get(f"/api/endpoints/{token}/requests.fragment?limit=0")
+        assert resp.status_code == 422
+
+
 async def test_list_requests_includes_signature_status(monkeypatch, database_url, engine, tmp_path):
     """GET /api/endpoints/{token}/requests items include signature_status field."""
     monkeypatch.setenv("DATABASE_URL", database_url.replace("+psycopg_async", "+psycopg"))

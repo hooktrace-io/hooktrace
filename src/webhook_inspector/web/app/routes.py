@@ -353,7 +353,7 @@ async def _fetch_requests_or_raise(
 @router.get("/api/endpoints/{token}/requests", response_model=RequestList)
 async def list_requests(
     token: str,
-    limit: int = 50,
+    limit: int = Query(default=50, ge=LIST_LIMIT_MIN, le=LIST_LIMIT_MAX),
     before_id: UUID | None = None,
     q: str | None = None,
     use_case: ListRequests = Depends(get_list_requests),  # noqa: B008
@@ -386,7 +386,7 @@ async def list_requests(
 async def list_requests_fragment(
     token: str,
     request: Request,
-    limit: int = 50,
+    limit: int = Query(default=50, ge=LIST_LIMIT_MIN, le=LIST_LIMIT_MAX),
     before_id: UUID | None = None,
     q: str | None = None,
     use_case: ListRequests = Depends(get_list_requests),  # noqa: B008
@@ -489,15 +489,10 @@ async def replay_request_route(
 async def list_forwards_route(
     token: str,
     status: Annotated[list[str] | None, Query()] = None,
-    limit: int = 50,
+    limit: int = Query(default=50, ge=LIST_LIMIT_MIN, le=LIST_LIMIT_MAX),
     before_id: UUID | None = None,
     use_case: ListForwards = Depends(get_list_forwards),  # noqa: B008
 ) -> ForwardList:
-    if not LIST_LIMIT_MIN <= limit <= LIST_LIMIT_MAX:
-        raise HTTPException(
-            status_code=400,
-            detail=f"limit must be in [{LIST_LIMIT_MIN}, {LIST_LIMIT_MAX}]",
-        )
     try:
         forwards = await use_case.execute(
             token=token, statuses=status, limit=limit, before_id=before_id

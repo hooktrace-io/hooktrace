@@ -395,14 +395,18 @@ async def test_stats_returns_all_six_statuses(app_client, ingestor_client, sessi
 
 
 @pytest.mark.asyncio
-async def test_limit_outside_range_returns_400(app_client):
+async def test_limit_outside_range_returns_422(app_client):
+    """FastAPI Query(ge=..., le=...) validation surfaces as 422 Unprocessable
+    Entity (Pydantic's default). Previously hand-rolled HTTPException(400);
+    swapping to Query() bumped the status to the framework-standard 422.
+    """
     token = await _create_endpoint(app_client)
 
     resp = await app_client.get(f"/api/endpoints/{token}/forwards?limit=0")
-    assert resp.status_code == 400
+    assert resp.status_code == 422
 
     resp = await app_client.get(f"/api/endpoints/{token}/forwards?limit=201")
-    assert resp.status_code == 400
+    assert resp.status_code == 422
 
 
 @pytest.mark.asyncio
