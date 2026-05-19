@@ -14,9 +14,10 @@ from uuid import UUID
 
 from arq.connections import RedisSettings
 from arq.cron import cron
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from webhook_inspector.config import Settings
+from webhook_inspector.infrastructure.database.session import make_engine
 from webhook_inspector.jobs.abuse_scan import run_abuse_scan
 from webhook_inspector.observability.logging import configure_logging
 from webhook_inspector.observability.metrics import configure_metrics, force_flush_metrics
@@ -101,7 +102,7 @@ async def startup(ctx: dict[str, object]) -> None:
     configure_metrics(service_name=settings.service_name + "-worker")
     logger.info("worker_startup", extra={"service": settings.service_name + "-worker"})
 
-    engine = create_async_engine(settings.database_url, pool_pre_ping=True, future=True)
+    engine = make_engine(settings)
     session_factory: async_sessionmaker[AsyncSession] = async_sessionmaker(
         engine, expire_on_commit=False, class_=AsyncSession
     )

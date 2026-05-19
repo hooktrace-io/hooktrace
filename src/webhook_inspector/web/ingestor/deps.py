@@ -8,7 +8,6 @@ from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
     async_sessionmaker,
-    create_async_engine,
 )
 
 from webhook_inspector.application.use_cases.capture_request import CaptureRequest
@@ -16,6 +15,7 @@ from webhook_inspector.config import Settings
 from webhook_inspector.domain.ports.blob_storage import BlobStorage
 from webhook_inspector.domain.ports.forward_queue import ForwardQueue
 from webhook_inspector.domain.ports.metrics_collector import MetricsCollector
+from webhook_inspector.infrastructure.database.session import make_engine
 from webhook_inspector.infrastructure.queue.null_forward_queue import NullForwardQueue
 from webhook_inspector.infrastructure.repositories.endpoint_repository import (
     PostgresEndpointRepository,
@@ -40,8 +40,7 @@ def get_settings() -> Settings:
 
 @lru_cache(maxsize=1)
 def _engine() -> AsyncEngine:
-    settings = get_settings()
-    return create_async_engine(settings.database_url, pool_pre_ping=True, future=True)
+    return make_engine(get_settings())
 
 
 @lru_cache(maxsize=1)
