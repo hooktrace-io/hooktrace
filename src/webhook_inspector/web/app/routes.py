@@ -75,6 +75,25 @@ from webhook_inspector.web.app.schemas.endpoint_config import EndpointConfigPatc
 from webhook_inspector.web.app.sse import stream_for_token
 from webhook_inspector.web.middleware.token_rate_limit import enforce_token_limit
 
+# --- Module-level constants ---------------------------------------------------
+# Per-token cap on outbound replays. IP-keyed middleware already protects the
+# API surface against scraping; this caps the blast radius of a single hijacked
+# token used to spam targets.
+REPLAY_LIMIT_PER_HOUR = 10
+
+# Window used by all hourly per-token caps (replay, capture, ...).
+RATE_LIMIT_WINDOW_SECONDS_1H = 3600
+
+# Max length of the `q` search query on /requests endpoints. Bounded so the
+# server doesn't run unbounded LIKE/regex over user-controlled strings.
+SEARCH_QUERY_MAX_CHARS = 200
+
+# Pagination bounds for list_forwards (and other listing endpoints that share
+# the same shape).
+LIST_LIMIT_MIN = 1
+LIST_LIMIT_MAX = 200
+
+
 router = APIRouter()
 
 
@@ -333,8 +352,11 @@ async def _fetch_requests_or_raise(
     use_case: ListRequests,
 ) -> list[CapturedRequest]:
     """Validate q length and fetch captured requests; raise HTTP errors on failure."""
-    if q is not None and len(q) > 200:
-        raise HTTPException(status_code=400, detail="q must be <= 200 characters")
+    if q is not None and len(q) > SEARCH_QUERY_MAX_CHARS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"q must be <= {SEARCH_QUERY_MAX_CHARS} characters",
+        )
     try:
         return await use_case.execute(token=token, limit=limit, before_id=before_id, q=q)
     except EndpointNotFoundError as e:
@@ -446,8 +468,8 @@ async def replay_request_route(
     await enforce_token_limit(
         token=token,
         rule_name="replay",
-        limit=10,
-        window_seconds=3600,
+        limit=REPLAY_LIMIT_PER_HOUR,
+        window_seconds=RATE_LIMIT_WINDOW_SECONDS_1H,
         metrics=get_metrics(),
     )
     try:
@@ -484,8 +506,11 @@ async def list_forwards_route(
     before_id: UUID | None = None,
     use_case: ListForwards = Depends(get_list_forwards),  # noqa: B008
 ) -> ForwardList:
-    if not 1 <= limit <= 200:
-        raise HTTPException(status_code=400, detail="limit must be in [1, 200]")
+    if not LIST_LIMIT_MIN <= limit <= LIST_LIMIT_MAX:
+        raise HTTPException(
+            status_code=400,
+            detail=f"limit must be in [{LIST_LIMIT_MIN}, {LIST_LIMIT_MAX}]",
+        )
     try:
         forwards = await use_case.execute(
             token=token, statuses=status, limit=limit, before_id=before_id

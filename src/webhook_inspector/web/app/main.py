@@ -24,6 +24,11 @@ TEMPLATES_DIR = Path(__file__).parent / "templates"
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 apply_globals(templates.env)
 
+# IP-keyed rate limit on the owner-facing API surface (/api/endpoints/).
+# Tuned for interactive use of the viewer + CLI; fail-open so a Redis outage
+# never locks owners out of their own data.
+API_RATE_LIMIT_PER_MINUTE = 300
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -116,7 +121,12 @@ app.add_middleware(
     redis_url_provider=lambda: os.environ.get("RATE_LIMIT_REDIS_URL"),
     rules={
         # Owner-facing API → fail-open if Redis dies (don't lock owners out).
-        "/api/endpoints/": _Rule(name="api", limit=300, window_seconds=60, fail_mode="open"),
+        "/api/endpoints/": _Rule(
+            name="api",
+            limit=API_RATE_LIMIT_PER_MINUTE,
+            window_seconds=60,
+            fail_mode="open",
+        ),
     },
     metrics_provider=get_metrics,
 )

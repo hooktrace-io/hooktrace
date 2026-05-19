@@ -14,6 +14,11 @@ from webhook_inspector.web.ingestor.deps import _engine, get_metrics
 from webhook_inspector.web.ingestor.routes import router
 from webhook_inspector.web.middleware.rate_limit import RateLimitMiddleware, _Rule
 
+# IP-keyed rate limit on the public capture surface (/h/{token}). Tuned an
+# order of magnitude lower than the app — capture is the abuse vector —
+# and fail-closed so a Redis outage never silently widens the firehose.
+INGEST_RATE_LIMIT_PER_MINUTE = 100
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -53,7 +58,12 @@ app.add_middleware(
     redis_url_provider=lambda: os.environ.get("RATE_LIMIT_REDIS_URL"),
     rules={
         # Capture surface = abuse vector → fail-closed (503) if Redis dies.
-        "/h/": _Rule(name="ingest", limit=100, window_seconds=60, fail_mode="closed"),
+        "/h/": _Rule(
+            name="ingest",
+            limit=INGEST_RATE_LIMIT_PER_MINUTE,
+            window_seconds=60,
+            fail_mode="closed",
+        ),
     },
     metrics_provider=get_metrics,
 )

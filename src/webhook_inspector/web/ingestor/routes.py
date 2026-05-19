@@ -25,6 +25,15 @@ from webhook_inspector.web.middleware.token_rate_limit import enforce_token_limi
 logger = logging.getLogger(__name__)
 
 
+# --- Module-level constants ---------------------------------------------------
+# Per-token cap on captures. The IP-keyed middleware blocks raw flooding;
+# this caps a single token's volume so a leaked URL can't run forever.
+CAPTURE_LIMIT_PER_HOUR = 1000
+
+# Window used by the hourly per-token cap above.
+RATE_LIMIT_WINDOW_SECONDS_1H = 3600
+
+
 router = APIRouter()
 
 
@@ -81,8 +90,8 @@ async def capture(
     await enforce_token_limit(
         token=token,
         rule_name="capture",
-        limit=1000,
-        window_seconds=3600,
+        limit=CAPTURE_LIMIT_PER_HOUR,
+        window_seconds=RATE_LIMIT_WINDOW_SECONDS_1H,
         metrics=get_metrics(),
     )
 
