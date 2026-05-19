@@ -30,32 +30,7 @@ from webhook_inspector.domain.ports.http_replay_target import (
 from webhook_inspector.domain.ports.metrics_collector import MetricsCollector
 from webhook_inspector.domain.ports.replay_repository import ReplayRepository
 from webhook_inspector.domain.ports.request_repository import RequestRepository
-
-# RFC 7230 §6.1 hop-by-hop headers + Host + Content-Length + auth + sender
-# signature headers. Mirrors PR7 forward _HEADERS_TO_STRIP_FROM_CAPTURED.
-_HEADERS_TO_STRIP = frozenset(
-    {
-        "connection",
-        "keep-alive",
-        "te",
-        "trailers",
-        "upgrade",
-        "transfer-encoding",
-        "proxy-authenticate",
-        "proxy-authorization",
-        "content-length",
-        "host",
-        "authorization",
-        "cookie",
-        "set-cookie",
-        "stripe-signature",
-        "x-hub-signature-256",
-        "x-shopify-hmac-sha256",
-        "x-twilio-signature",
-        "x-slack-signature",
-        "x-zoom-signature",
-    }
-)
+from webhook_inspector.domain.services.forwarded_headers import HEADERS_TO_STRIP_FROM_CAPTURED
 
 MAX_REPLAY_BODY_BYTES = 1 * 1024 * 1024
 
@@ -115,7 +90,9 @@ class ReplayRequest:
         # Headers : strip hop-by-hop + auth + sender sig.
         if include_headers:
             headers = {
-                k: v for k, v in captured.headers.items() if k.lower() not in _HEADERS_TO_STRIP
+                k: v
+                for k, v in captured.headers.items()
+                if k.lower() not in HEADERS_TO_STRIP_FROM_CAPTURED
             }
         else:
             headers = {}

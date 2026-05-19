@@ -36,39 +36,10 @@ from webhook_inspector.domain.ports.forward_repository import ForwardRepository
 from webhook_inspector.domain.ports.http_replay_target import HttpReplayTarget, SsrfBlockedError
 from webhook_inspector.domain.ports.metrics_collector import MetricsCollector
 from webhook_inspector.domain.ports.request_repository import RequestRepository
+from webhook_inspector.domain.services.forwarded_headers import HEADERS_TO_STRIP_FROM_CAPTURED
 from webhook_inspector.infrastructure.crypto.secrets import decrypt_secret
 
 logger = logging.getLogger(__name__)
-
-# RFC 7230 §6.1 hop-by-hop headers + Host + Content-Length + auth + sender
-# signature headers. Mirrors PR4 ReplayRequest._HEADERS_TO_STRIP — keep in sync
-# when either set changes. The two sets are intentionally separate so each
-# module has explicit ownership; a code comment cross-links them.
-_HEADERS_TO_STRIP_FROM_CAPTURED = frozenset(
-    {
-        "connection",
-        "keep-alive",
-        "te",
-        "trailers",
-        "upgrade",
-        "transfer-encoding",
-        "proxy-authenticate",
-        "proxy-authorization",
-        "content-length",
-        "host",
-        "authorization",
-        "cookie",
-        "set-cookie",
-        # Stripe/GitHub/etc. signature headers — signed against the original
-        # body+timestamp, will NOT verify against our re-signed forward. Strip.
-        "stripe-signature",
-        "x-hub-signature-256",
-        "x-shopify-hmac-sha256",
-        "x-twilio-signature",
-        "x-slack-signature",
-        "x-zoom-signature",
-    }
-)
 
 
 @dataclass
@@ -121,7 +92,7 @@ class ExecuteForward:
         outbound_headers: dict[str, str] = {
             k: v
             for k, v in captured.headers.items()
-            if k.lower() not in _HEADERS_TO_STRIP_FROM_CAPTURED
+            if k.lower() not in HEADERS_TO_STRIP_FROM_CAPTURED
         }
         if endpoint.forward_headers:
             outbound_headers.update(endpoint.forward_headers)
