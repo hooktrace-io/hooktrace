@@ -8,7 +8,6 @@ from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
     async_sessionmaker,
-    create_async_engine,
 )
 
 from webhook_inspector.application.use_cases.abandon_forward import AbandonForward
@@ -28,6 +27,7 @@ from webhook_inspector.application.use_cases.update_endpoint_config import Updat
 from webhook_inspector.config import Settings
 from webhook_inspector.domain.ports.forward_queue import ForwardQueue
 from webhook_inspector.domain.ports.metrics_collector import MetricsCollector
+from webhook_inspector.infrastructure.database.session import make_engine
 from webhook_inspector.infrastructure.http.safe_replay_target import SafeReplayTarget
 from webhook_inspector.infrastructure.notifications.postgres_notifier import PostgresNotifier
 from webhook_inspector.infrastructure.queue.null_forward_queue import NullForwardQueue
@@ -57,8 +57,7 @@ def get_settings() -> Settings:
 
 @lru_cache(maxsize=1)
 def _engine() -> AsyncEngine:
-    settings = get_settings()
-    return create_async_engine(settings.database_url, pool_pre_ping=True, future=True)
+    return make_engine(get_settings())
 
 
 @lru_cache(maxsize=1)
