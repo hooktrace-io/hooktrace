@@ -33,6 +33,28 @@ fly secrets set --app webhook-inspector-web \
   S3_SECRET_ACCESS_KEY="<r2-secret-key>"
 ```
 
+### R2 lifecycle rule
+
+The `wi-blobs-prod` bucket has a lifecycle rule "delete objects > 31 days
+old" configured via the Cloudflare dashboard (Storage → R2 → wi-blobs-prod
+→ Settings → Object lifecycle rules). This garbage-collects orphan blobs
+left by `Endpoint` / `CapturedRequest` cascade-deletes: the cleaner deletes
+DB rows but not R2 objects, so R2-native lifecycle is the right primitive.
+
+Rule:
+
+- Match: all objects (no prefix filter)
+- Action: delete after 31 days (1-day grace beyond the 30-day endpoint TTL,
+  so a blob never disappears before the row that references it)
+
+If the rule is ever removed, blob storage grows unbounded. Re-add via the
+dashboard; no application code path depends on it.
+
+Fallback (not currently implemented): the cleaner could call
+`blob_storage.delete(blob_key)` per row before deleting the request
+(roughly 10 LOC). Skipped in V3 because R2-native is cheaper and more
+reliable than running list-and-delete from a cron.
+
 ## Observability
 
 Traces and metrics go to Honeycomb via OTLP. Set `OTLP_ENDPOINT` and
