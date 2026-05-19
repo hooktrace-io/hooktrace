@@ -1,5 +1,6 @@
 import asyncio
 import contextlib
+import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -14,9 +15,10 @@ from webhook_inspector.observability.metrics import configure_metrics
 from webhook_inspector.observability.tracing import configure_tracing, instrument_app
 from webhook_inspector.web._secrets_key import _validate_secrets_key
 from webhook_inspector.web.app import deps as app_deps
-from webhook_inspector.web.app.deps import _engine
+from webhook_inspector.web.app.deps import _engine, get_metrics
 from webhook_inspector.web.app.routes import router
 from webhook_inspector.web.app.template_globals import apply_globals
+from webhook_inspector.web.middleware.rate_limit import RateLimitMiddleware, _Rule
 
 TEMPLATES_DIR = Path(__file__).parent / "templates"
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
@@ -104,5 +106,19 @@ async def _active_endpoints_gauge_loop() -> None:
 
 
 app = FastAPI(title="Webhook Inspector — App", lifespan=lifespan)
+# Rate limit wired at module-eval, NOT in lifespan: FastAPI raises
+# RuntimeError on add_middleware once the app has started. The middleware
+# matches only the /api/endpoints/ prefix — the /{token} viewer page and
+# the /stream/{token} SSE endpoint bypass entirely (SSE is long-lived and
+# counting chunks is meaningless; viewer page is owner-facing).
+app.add_middleware(
+    RateLimitMiddleware,
+    redis_url_provider=lambda: os.environ.get("RATE_LIMIT_REDIS_URL"),
+    rules={
+        # Owner-facing API → fail-open if Redis dies (don't lock owners out).
+        "/api/endpoints/": _Rule(name="api", limit=300, window_seconds=60, fail_mode="open"),
+    },
+    metrics_provider=get_metrics,
+)
 app.state.templates = templates
 app.include_router(router)
