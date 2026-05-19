@@ -13,9 +13,11 @@ from typing import Any, ClassVar
 from uuid import UUID
 
 from arq.connections import RedisSettings
+from arq.cron import cron
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from webhook_inspector.config import Settings
+from webhook_inspector.jobs.abuse_scan import run_abuse_scan
 from webhook_inspector.observability.logging import configure_logging
 from webhook_inspector.observability.metrics import configure_metrics, force_flush_metrics
 from webhook_inspector.observability.tracing import configure_tracing
@@ -160,6 +162,13 @@ class WorkerSettings:
     redis_settings = RedisSettings.from_dsn(_REDIS_DSN)
 
     functions: ClassVar[list[object]] = [execute_forward]
+
+    # Daily abuse scan at 03:30 UTC. run_at_startup=False keeps the scan
+    # off the cold-start path — we don't want a worker rotation to trigger
+    # a full Postgres scan + Discord notification.
+    cron_jobs: ClassVar[list[Any]] = [
+        cron(run_abuse_scan, hour=3, minute=30, run_at_startup=False),
+    ]
 
     # Retry policy. NOT 1: a non-zero margin lets arq pick up a job whose
     # function crashed before its own retry logic ran (e.g. OOM, SIGTERM

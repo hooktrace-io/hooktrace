@@ -17,9 +17,9 @@ async def test_create_with_slug_returns_token_equal_to_slug(monkeypatch, databas
     _reset_deps()
 
     async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
-        resp = await c.post("/api/endpoints", json={"slug": "my-stripe-test"})
+        resp = await c.post("/api/endpoints", json={"slug": "my-app-webhooks"})
         assert resp.status_code == 201
-        assert resp.json()["token"] == "my-stripe-test"
+        assert resp.json()["token"] == "my-app-webhooks"
 
 
 async def test_slug_conflict_returns_409(monkeypatch, database_url, engine):
@@ -63,3 +63,16 @@ async def test_create_without_slug_preserves_v1_behavior(monkeypatch, database_u
         token = resp.json()["token"]
         # token_urlsafe(16) → 22 chars base64url
         assert len(token) == 22
+
+
+async def test_create_endpoint_with_denylisted_slug_returns_400(monkeypatch, database_url, engine):
+    monkeypatch.setenv("DATABASE_URL", database_url.replace("+psycopg_async", "+psycopg"))
+    _reset_deps()
+
+    async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.post("/api/endpoints", json={"slug": "stripe-test"})
+        # SlugDenylistedError inherits from EndpointValidationError, which the
+        # route maps to 400 with detail=str(e). Don't assert the exact message
+        # — the route uses str(e), which would couple the test to the
+        # exception's formatting. Assert the status code only.
+        assert resp.status_code == 400

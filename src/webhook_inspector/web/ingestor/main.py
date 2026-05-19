@@ -1,3 +1,4 @@
+import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -9,8 +10,9 @@ from webhook_inspector.observability.metrics import configure_metrics
 from webhook_inspector.observability.tracing import configure_tracing, instrument_app
 from webhook_inspector.web._secrets_key import _validate_secrets_key
 from webhook_inspector.web.ingestor import deps as ingestor_deps
-from webhook_inspector.web.ingestor.deps import _engine
+from webhook_inspector.web.ingestor.deps import _engine, get_metrics
 from webhook_inspector.web.ingestor.routes import router
+from webhook_inspector.web.middleware.rate_limit import RateLimitMiddleware, _Rule
 
 
 @asynccontextmanager
@@ -42,4 +44,17 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 
 app = FastAPI(title="Webhook Inspector — Ingestor", lifespan=lifespan)
+# Rate limit wired at module-eval, NOT in lifespan: FastAPI raises
+# RuntimeError on add_middleware once the app has started. The middleware
+# itself is lazy — providers run on first request, so tests that never
+# set RATE_LIMIT_REDIS_URL bypass Redis entirely.
+app.add_middleware(
+    RateLimitMiddleware,
+    redis_url_provider=lambda: os.environ.get("RATE_LIMIT_REDIS_URL"),
+    rules={
+        # Capture surface = abuse vector → fail-closed (503) if Redis dies.
+        "/h/": _Rule(name="ingest", limit=100, window_seconds=60, fail_mode="closed"),
+    },
+    metrics_provider=get_metrics,
+)
 app.include_router(router)

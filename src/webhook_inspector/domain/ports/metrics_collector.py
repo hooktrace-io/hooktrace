@@ -52,3 +52,16 @@ class MetricsCollector(ABC):
         CaptureRequest failed (Redis down, etc.). The Forward row was saved
         but no worker job was scheduled; operator must re-enqueue manually.
         """
+
+    @abstractmethod
+    def rate_limit_block(self, *, rule: str, reason: str) -> None:
+        """Increment rate_limit_block_total{rule, reason}.
+        rule values: ingest | api | replay | capture
+        reason values: quota | fail_closed
+        """
+
+    @abstractmethod
+    def rate_limit_redis_error(self, *, rule: str) -> None:
+        """Increment rate_limit_redis_error_total{rule}.
+        Cardinality strict — rule label only, no IP/token/path.
+        """

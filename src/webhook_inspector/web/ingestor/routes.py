@@ -15,9 +15,12 @@ from webhook_inspector.config import Settings
 from webhook_inspector.web.ingestor.deps import (
     _blob_storage,
     get_capture_request,
+    get_metrics,
     get_session,
     get_settings,
 )
+from webhook_inspector.web.middleware.client_ip import extract_client_ip
+from webhook_inspector.web.middleware.token_rate_limit import enforce_token_limit
 
 logger = logging.getLogger(__name__)
 
@@ -73,6 +76,16 @@ async def capture(
     use_case: CaptureRequest = Depends(get_capture_request),  # noqa: B008
     settings: Settings = Depends(get_settings),  # noqa: B008
 ) -> Response:
+    # Per-token cap (1000/h): the IP-keyed middleware blocks raw flooding;
+    # this caps a single token's volume so a leaked URL can't run forever.
+    await enforce_token_limit(
+        token=token,
+        rule_name="capture",
+        limit=1000,
+        window_seconds=3600,
+        metrics=get_metrics(),
+    )
+
     content_length = request.headers.get("content-length")
     if content_length and int(content_length) > settings.max_body_bytes:
         raise HTTPException(status_code=413, detail="payload too large")
@@ -89,7 +102,7 @@ async def capture(
             query_string=request.url.query or None,
             headers={k.lower(): v for k, v in request.headers.items()},
             body=body,
-            source_ip=request.client.host if request.client else "0.0.0.0",
+            source_ip=extract_client_ip(request),
         )
     except EndpointNotFoundError as e:
         raise HTTPException(status_code=404, detail="endpoint not found") from e

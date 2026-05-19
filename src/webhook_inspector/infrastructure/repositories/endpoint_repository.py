@@ -31,6 +31,8 @@ class PostgresEndpointRepository(EndpointRepository):
             forward_url=endpoint.forward_url,
             forward_headers=endpoint.forward_headers,
             forward_secret_encrypted=endpoint.forward_secret_encrypted,
+            flagged_at=endpoint.flagged_at,
+            flag_reason=endpoint.flag_reason,
         )
         self._session.add(row)
         try:
@@ -56,6 +58,8 @@ class PostgresEndpointRepository(EndpointRepository):
                 forward_url=endpoint.forward_url,
                 forward_headers=endpoint.forward_headers,
                 forward_secret_encrypted=endpoint.forward_secret_encrypted,
+                flagged_at=endpoint.flagged_at,
+                flag_reason=endpoint.flag_reason,
             )
         )
         result = await self._session.execute(stmt)
@@ -109,4 +113,6 @@ def _to_entity(row: EndpointTable) -> Endpoint:
         forward_url=row.forward_url,
         forward_headers=row.forward_headers,
         forward_secret_encrypted=row.forward_secret_encrypted,
+        flagged_at=row.flagged_at,
+        flag_reason=row.flag_reason,
     )

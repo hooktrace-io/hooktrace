@@ -59,6 +59,14 @@ class OtelMetricsCollector(MetricsCollector):
             "webhook_inspector.forward.enqueue_failed_total",
             description="Best-effort enqueue failures (Redis unreachable at capture time).",
         )
+        self._rate_limit_block = meter.create_counter(
+            "webhook_inspector.rate_limit.block_total",
+            description="Requests blocked by rate limit.",
+        )
+        self._rate_limit_redis_error = meter.create_counter(
+            "webhook_inspector.rate_limit.redis_error_total",
+            description="Rate limit middleware Redis errors.",
+        )
 
     def endpoint_created(self) -> None:
         self._endpoints_created.add(1)
@@ -95,3 +103,9 @@ class OtelMetricsCollector(MetricsCollector):
 
     def forward_enqueue_failed(self) -> None:
         self._forward_enqueue_failed.add(1)
+
+    def rate_limit_block(self, *, rule: str, reason: str) -> None:
+        self._rate_limit_block.add(1, {"rule": rule, "reason": reason})
+
+    def rate_limit_redis_error(self, *, rule: str) -> None:
+        self._rate_limit_redis_error.add(1, {"rule": rule})

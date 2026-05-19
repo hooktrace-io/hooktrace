@@ -14,6 +14,12 @@ class CapturedCall:
 
 
 @dataclass
+class RateLimitBlockCall:
+    rule: str
+    reason: str
+
+
+@dataclass
 class FakeMetricsCollector(MetricsCollector):
     endpoints_created_count: int = 0
     captured_calls: list[CapturedCall] = field(default_factory=list)
@@ -23,6 +29,8 @@ class FakeMetricsCollector(MetricsCollector):
     ssrf_dns_validation_calls: list[str] = field(default_factory=list)
     forward_attempt_calls: list[str] = field(default_factory=list)
     forward_enqueue_failed_count: int = 0
+    rate_limit_block_calls: list[RateLimitBlockCall] = field(default_factory=list)
+    rate_limit_redis_error_calls: list[str] = field(default_factory=list)
 
     def endpoint_created(self) -> None:
         self.endpoints_created_count += 1
@@ -56,3 +64,9 @@ class FakeMetricsCollector(MetricsCollector):
 
     def forward_enqueue_failed(self) -> None:
         self.forward_enqueue_failed_count += 1
+
+    def rate_limit_block(self, *, rule: str, reason: str) -> None:
+        self.rate_limit_block_calls.append(RateLimitBlockCall(rule=rule, reason=reason))
+
+    def rate_limit_redis_error(self, *, rule: str) -> None:
+        self.rate_limit_redis_error_calls.append(rule)

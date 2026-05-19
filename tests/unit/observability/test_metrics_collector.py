@@ -66,3 +66,21 @@ def test_cleaner_run_with_zero_deletions_still_emits_heartbeat():
     collector.cleaner_run(deleted=0)
     runs = _metric_data_points(reader, "webhook_inspector.cleaner.runs.completed")
     assert sum(p.value for p in runs) == 1
+
+
+def test_rate_limit_block_records_rule_and_reason_labels():
+    collector, reader = _build_collector()
+    collector.rate_limit_block(rule="ingest", reason="quota")
+    collector.rate_limit_block(rule="ingest", reason="fail_closed")
+    points = _metric_data_points(reader, "webhook_inspector.rate_limit.block_total")
+    by_label = {(p.attributes.get("rule"), p.attributes.get("reason")): p.value for p in points}
+    assert by_label.get(("ingest", "quota")) == 1
+    assert by_label.get(("ingest", "fail_closed")) == 1
+
+
+def test_rate_limit_redis_error_records_rule_label():
+    collector, reader = _build_collector()
+    collector.rate_limit_redis_error(rule="api")
+    collector.rate_limit_redis_error(rule="api")
+    points = _metric_data_points(reader, "webhook_inspector.rate_limit.redis_error_total")
+    assert sum(p.value for p in points if p.attributes.get("rule") == "api") == 2

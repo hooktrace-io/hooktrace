@@ -33,5 +33,9 @@ class ReservedSlugError(EndpointValidationError):
     """slug is on the reserved list and cannot be claimed."""
 
 
+class SlugDenylistedError(EndpointValidationError):
+    """slug contains a denylisted substring (brand name, admin reserved, phishing pattern)."""
+
+
 class SlugAlreadyTakenError(Exception):
     """slug is already used by another endpoint."""

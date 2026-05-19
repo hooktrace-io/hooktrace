@@ -28,3 +28,11 @@ class Settings(BaseSettings):
     redis_url: str | None = (
         None  # set as Fly secret on worker (Upstash, rediss://) + locally to redis://localhost:6379 for dev
     )
+    # Separate Redis URL for the rate-limit middleware. May (and usually
+    # will) point at the same instance as redis_url, but kept as its own
+    # setting so the rate limiter can be wired/disabled independently of
+    # the forward queue. Read directly via os.environ in module-eval code
+    # paths (see web/middleware/rate_limit.py) because Settings() requires
+    # database_url and module-eval is too early for test fixtures.
+    rate_limit_redis_url: str | None = None
+    abuse_webhook_url: str | None = None  # Discord webhook URL; if None, abuse scan logs only

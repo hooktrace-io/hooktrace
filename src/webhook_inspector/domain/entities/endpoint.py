@@ -37,6 +37,11 @@ class Endpoint:
     forward_headers: dict[str, str] | None = None
     forward_secret_encrypted: bytes | None = None
 
+    # V3 — anti-abuse flags (PR10 Block A). Both are set together by the
+    # abuse scan / manual review workflow; never persisted independently.
+    flagged_at: datetime | None = None
+    flag_reason: str | None = None
+
     @classmethod
     def create(
         cls,
@@ -68,6 +73,8 @@ class Endpoint:
             response_body=response_body,
             response_headers=headers,
             response_delay_ms=response_delay_ms,
+            flagged_at=None,
+            flag_reason=None,
         )
 
     def is_expired(self) -> bool:
