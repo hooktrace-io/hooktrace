@@ -48,7 +48,7 @@ async def execute_forward(ctx: dict[str, Any], forward_id_str: str) -> None:
     silently swallow failures.
     """
     from webhook_inspector.application.use_cases.execute_forward import ExecuteForward
-    from webhook_inspector.infrastructure.http.safe_replay_target import SafeReplayTarget
+    from webhook_inspector.infrastructure.http.safe_replay_target import make_safe_replay_target
     from webhook_inspector.infrastructure.queue.arq_forward_queue import ArqForwardQueue
     from webhook_inspector.infrastructure.repositories.endpoint_repository import (
         PostgresEndpointRepository,
@@ -68,11 +68,7 @@ async def execute_forward(ctx: dict[str, Any], forward_id_str: str) -> None:
                 request_repo=PostgresRequestRepository(session),
                 forward_repo=PostgresForwardRepository(session),
                 forward_queue=ArqForwardQueue(ctx["redis"]),
-                target=SafeReplayTarget(
-                    blocked_host_suffixes=("hooktrace.io",),
-                    timeout_seconds=10.0,
-                    max_response_bytes=256 * 1024,
-                ),
+                target=make_safe_replay_target(),
                 blob_storage=ctx["_blob_storage"],
                 metrics=ctx["_metrics_collector"],
                 secrets_key=ctx["_secrets_key"],

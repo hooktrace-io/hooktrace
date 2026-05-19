@@ -28,7 +28,7 @@ from webhook_inspector.config import Settings
 from webhook_inspector.domain.ports.forward_queue import ForwardQueue
 from webhook_inspector.domain.ports.metrics_collector import MetricsCollector
 from webhook_inspector.infrastructure.database.session import make_engine
-from webhook_inspector.infrastructure.http.safe_replay_target import SafeReplayTarget
+from webhook_inspector.infrastructure.http.safe_replay_target import make_safe_replay_target
 from webhook_inspector.infrastructure.notifications.postgres_notifier import PostgresNotifier
 from webhook_inspector.infrastructure.queue.null_forward_queue import NullForwardQueue
 from webhook_inspector.infrastructure.repositories.endpoint_repository import (
@@ -152,11 +152,7 @@ async def get_replay_request(
         endpoint_repo=PostgresEndpointRepository(session),
         request_repo=PostgresRequestRepository(session),
         replay_repo=PostgresReplayRepository(session),
-        target=SafeReplayTarget(
-            blocked_host_suffixes=("hooktrace.io",),
-            timeout_seconds=10.0,
-            max_response_bytes=256 * 1024,
-        ),
+        target=make_safe_replay_target(),
         blob_storage=make_blob_storage(settings),
         metrics=get_metrics(),
     )

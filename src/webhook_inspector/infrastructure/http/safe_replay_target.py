@@ -22,6 +22,14 @@ from webhook_inspector.domain.ports.http_replay_target import (
 _ALLOWED_SCHEMES = frozenset({"http", "https"})
 _ALLOWED_PORTS = frozenset({80, 443})
 
+# --- Default config shared between web replay route + worker forward job ----
+# Both paths run untrusted user URLs through the same SSRF guard with the
+# same timeout and the same response cap. Keeping the values in one place
+# stops them from drifting.
+_DEFAULT_BLOCKED_HOST_SUFFIXES: tuple[str, ...] = ("hooktrace.io",)
+_DEFAULT_TIMEOUT_SECONDS: float = 10.0
+_DEFAULT_MAX_RESPONSE_BYTES: int = 256 * 1024
+
 
 def _resolve(host: str) -> list[str]:
     """Thin wrapper around getaddrinfo so tests can monkeypatch."""
@@ -124,3 +132,18 @@ class SafeReplayTarget(HttpReplayTarget):
                     body_out = body_out[: self._max_response_bytes]
                     break
             return resp.status_code, dict(resp.headers), bytes(body_out)
+
+
+def make_safe_replay_target() -> SafeReplayTarget:
+    """Default-configured SafeReplayTarget for outbound replay + forward.
+
+    Centralized so the timeout, response cap, and blocked-host suffixes stay
+    in sync between the web replay route (get_replay_request) and the worker
+    forward job (execute_forward). Callers that need different values can
+    still instantiate `SafeReplayTarget(...)` directly.
+    """
+    return SafeReplayTarget(
+        blocked_host_suffixes=_DEFAULT_BLOCKED_HOST_SUFFIXES,
+        timeout_seconds=_DEFAULT_TIMEOUT_SECONDS,
+        max_response_bytes=_DEFAULT_MAX_RESPONSE_BYTES,
+    )
