@@ -184,7 +184,7 @@ github    13 requests   0 signature errors   p95  ~80ms</code></pre>
           <h3 class="text-emerald-400 font-bold mb-1">Forward with retry &amp; DLQ</h3>
           <p class="text-slate-300 text-sm mb-2">
             Relay every webhook to your prod backend with exponential retry
-            (5 attempts: 30s &rarr; 2m &rarr; 10m &rarr; 1h &rarr; 4h),
+            (up to 5 attempts: 30s &rarr; 2m &rarr; 10m &rarr; 1h between retries),
             HMAC-SHA256 signature (Stripe-compatible <code>t=,v1=</code>),
             and a DLQ to retry or abandon failed deliveries.
           </p>

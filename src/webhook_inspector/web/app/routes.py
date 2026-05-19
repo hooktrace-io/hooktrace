@@ -2,9 +2,11 @@ import re
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from math import ceil
+from pathlib import Path
 from typing import Annotated, Literal, cast
 from uuid import UUID
 
+import markdown
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field, HttpUrl
@@ -637,6 +639,112 @@ async def tos_view(request: Request) -> HTMLResponse:
     return cast(
         HTMLResponse,
         templates.TemplateResponse(request=request, name="tos.html", context={}),
+    )
+
+
+# Public integration docs (PR13). The .md files ship inside the package
+# (src/webhook_inspector/docs/integrations/) so the path resolves identically
+# in editable dev installs and in production wheel installs — no Dockerfile
+# tweak or env var needed.
+_DOCS_ROOT: Path = Path(__file__).resolve().parent.parent.parent / "docs" / "integrations"
+
+# Closed allowlist for slug → file. Validated against this frozen set BEFORE
+# any filesystem access — never path-joined directly with user input. Adding
+# a new service requires editing both this set and the matching .md file.
+_ALLOWED_DOCS: frozenset[str] = frozenset(
+    {
+        "stripe",
+        "github",
+        "shopify",
+        "twilio",
+        "mailgun",
+        "discord",
+        "slack",
+        "zapier",
+        "n8n",
+        "verifying-forwards",
+    }
+)
+
+_DOC_TITLES: dict[str, str] = {
+    "stripe": "Stripe webhooks",
+    "github": "GitHub webhooks",
+    "shopify": "Shopify webhooks",
+    "twilio": "Twilio webhooks",
+    "mailgun": "Mailgun webhooks",
+    "discord": "Discord webhooks",
+    "slack": "Slack webhooks",
+    "zapier": "Zapier webhooks",
+    "n8n": "n8n webhooks",
+    "verifying-forwards": "Verifying hooktrace forwards",
+}
+
+
+def _render_doc_markdown(md_path: Path) -> str:
+    """Render a markdown file to HTML. Pure I/O + markdown call.
+
+    The `markdown` package is untyped (no published stubs at the version we
+    pin), so `markdown.markdown(...)` is `Any`. Cast to str at the boundary
+    to keep callers strictly typed without sprinkling `cast(..)` further up.
+    """
+    text_md = md_path.read_text(encoding="utf-8")
+    return cast(str, markdown.markdown(text_md, extensions=["fenced_code", "tables"]))
+
+
+@router.get("/docs/integrations", response_class=HTMLResponse)
+async def docs_integrations_index(request: Request) -> HTMLResponse:
+    """Public landing for the integration guides. Renders README.md."""
+    index_path = _DOCS_ROOT / "README.md"
+    rendered = _render_doc_markdown(index_path)
+    templates = request.app.state.templates
+    return cast(
+        HTMLResponse,
+        templates.TemplateResponse(
+            request=request,
+            name="docs.html",
+            context={
+                "title": "Integration guides",
+                "description": (
+                    "HMAC signature schemes hooktrace validates for Stripe, GitHub, "
+                    "Shopify, Twilio, Mailgun, Discord, Slack, Zapier, n8n, plus the "
+                    "verifying-forwards public contract."
+                ),
+                "slug": None,
+                "content": rendered,
+            },
+        ),
+    )
+
+
+@router.get("/docs/integrations/{slug}", response_class=HTMLResponse)
+async def docs_integration_page(slug: str, request: Request) -> HTMLResponse:
+    """Render one integration doc by slug.
+
+    The slug is validated against `_ALLOWED_DOCS` — a frozen set of the 10
+    known doc names. Anything outside the set returns 404. We never join the
+    raw slug onto a filesystem path, so path traversal (`../etc/passwd`,
+    URL-encoded `..`, etc.) cannot escape `_DOCS_ROOT`.
+    """
+    if slug not in _ALLOWED_DOCS:
+        raise HTTPException(status_code=404, detail="doc not found")
+
+    md_path = _DOCS_ROOT / f"{slug}.md"
+    rendered = _render_doc_markdown(md_path)
+
+    title = _DOC_TITLES.get(slug, slug)
+    templates = request.app.state.templates
+    return cast(
+        HTMLResponse,
+        templates.TemplateResponse(
+            request=request,
+            name="docs.html",
+            context={
+                "title": title,
+                "description": f"{title} — what hooktrace validates and where to find the secret.",
+                "slug": slug,
+                "content": rendered,
+            },
+        ),
     )
 
 

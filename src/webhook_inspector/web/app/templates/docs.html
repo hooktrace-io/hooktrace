@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{ title }} &mdash; hooktrace docs</title>
+  <meta name="description" content="{{ description }}">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    /* Minimal manual styling for rendered markdown — we don't pull in the
+       Tailwind Typography plugin because the CDN build doesn't include it. */
+    .md h1 { font-size: 1.875rem; line-height: 2.25rem; font-weight: 700; color: #34d399; margin-bottom: 1rem; }
+    .md h2 { font-size: 1.25rem; line-height: 1.75rem; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.05em; margin-top: 2rem; margin-bottom: 0.5rem; font-weight: 600; }
+    .md h3 { font-size: 1.05rem; color: #cbd5e1; margin-top: 1.25rem; margin-bottom: 0.5rem; font-weight: 600; }
+    .md p { color: #cbd5e1; line-height: 1.65; margin-bottom: 0.75rem; }
+    .md ul, .md ol { color: #cbd5e1; padding-left: 1.5rem; margin-bottom: 0.75rem; }
+    .md ul { list-style: disc; }
+    .md ol { list-style: decimal; }
+    .md li { margin-bottom: 0.25rem; line-height: 1.55; }
+    .md a { color: #34d399; }
+    .md a:hover { text-decoration: underline; }
+    .md code { background: #0f172a; color: #fbbf24; padding: 0.1rem 0.35rem; border-radius: 0.25rem; font-size: 0.85em; }
+    .md pre { background: #0f172a; border: 1px solid #334155; border-radius: 0.5rem; padding: 1rem; overflow-x: auto; margin-bottom: 1rem; }
+    .md pre code { background: transparent; color: #e2e8f0; padding: 0; font-size: 0.85rem; }
+    .md table { border-collapse: collapse; margin-bottom: 1rem; }
+    .md th, .md td { border: 1px solid #334155; padding: 0.4rem 0.75rem; color: #cbd5e1; font-size: 0.9rem; }
+    .md th { background: #0f172a; color: #94a3b8; text-align: left; }
+    .md strong { color: #e2e8f0; }
+  </style>
+</head>
+<body class="bg-slate-900 text-slate-100 min-h-screen font-mono">
+
+  <header class="border-b border-slate-700 px-6 py-4">
+    <nav class="max-w-3xl mx-auto text-sm">
+      <a href="/" class="text-emerald-400 font-bold">hooktrace</a>
+      <span class="text-slate-500"> / </span>
+      <a href="/docs/integrations" class="text-slate-300 hover:text-slate-100">integrations</a>
+      {% if slug %}
+        <span class="text-slate-500"> / </span>
+        <span class="text-slate-300">{{ slug }}</span>
+      {% endif %}
+    </nav>
+  </header>
+
+  <main class="max-w-3xl mx-auto px-6 py-12">
+    <article class="md">
+      {{ content | safe }}
+    </article>
+
+    <footer class="text-slate-500 text-xs border-t border-slate-700 pt-6 mt-12">
+      <a href="/" class="text-emerald-400 hover:underline">&larr; back to hooktrace</a>
+    </footer>
+  </main>
+
+</body>
+</html>
