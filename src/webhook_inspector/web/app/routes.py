@@ -1,6 +1,7 @@
 import re
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
+from math import ceil
 from typing import Annotated, Literal, cast
 from uuid import UUID
 
@@ -19,6 +20,7 @@ from webhook_inspector.application.use_cases.export_requests import (
     ExportRequests,
     ExportTooLargeError,
 )
+from webhook_inspector.application.use_cases.get_endpoint import GetEndpoint
 from webhook_inspector.application.use_cases.get_forward_stats import GetForwardStats
 from webhook_inspector.application.use_cases.list_forwards import ListForwards
 from webhook_inspector.application.use_cases.list_integrations import ListIntegrations
@@ -53,6 +55,7 @@ from webhook_inspector.web.app.deps import (
     _session_factory,
     get_abandon_forward,
     get_create_endpoint,
+    get_endpoint_use_case,
     get_export_requests,
     get_forward_stats_use_case,
     get_list_forwards,
@@ -687,11 +690,24 @@ async def viewer(
     token: str,
     request: Request,
     use_case: ListRequests = Depends(get_list_requests),  # noqa: B008
+    get_endpoint: GetEndpoint = Depends(get_endpoint_use_case),  # noqa: B008
 ) -> HTMLResponse:
     try:
+        endpoint = await get_endpoint.execute(token=token)
         initial = await use_case.execute(token=token, limit=50)
     except EndpointNotFoundError as e:
         raise HTTPException(status_code=404, detail="endpoint not found") from e
+
+    # Countdown badge: ceil so 23h59 still reads "1 day", clamp to 0 so an
+    # expires_at in the past (cleaner hasn't run yet) shows "Expires today"
+    # rather than a negative number. Postgres TIMESTAMP WITHOUT TIME ZONE
+    # returns a naive datetime ; we treat stored values as UTC (matches what
+    # CreateEndpoint persists via datetime.now(UTC)).
+    expires_at = endpoint.expires_at
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=UTC)
+    delta = expires_at - datetime.now(UTC)
+    days_until_expiry = max(0, ceil(delta.total_seconds() / 86400))
 
     templates = request.app.state.templates
     return cast(
@@ -702,6 +718,7 @@ async def viewer(
             context={
                 "token": token,
                 "hook_url": f"{hook_base_url(request)}/h/{token}",
+                "days_until_expiry": days_until_expiry,
                 "initial_requests": [
                     {
                         "id": str(r.id),
