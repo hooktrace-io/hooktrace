@@ -19,6 +19,7 @@ them to record_outcome failure to keep arq from retrying via max_tries —
 Model B owns the retry budget.
 """
 
+import asyncio
 import logging
 import time
 from dataclasses import dataclass
@@ -69,8 +70,14 @@ class ExecuteForward:
             self.metrics.forward_attempt(status="skipped")
             return
 
-        endpoint = await self.endpoint_repo.find_by_id(claimed.endpoint_id)
-        captured = await self.request_repo.find_by_id(claimed.request_id)
+        # Fetch endpoint + captured request in parallel: they're keyed by
+        # different IDs and hit different tables; no point waiting on them
+        # sequentially. Body fetch from R2 (below) depends on captured.blob_key
+        # so it stays after this gather.
+        endpoint, captured = await asyncio.gather(
+            self.endpoint_repo.find_by_id(claimed.endpoint_id),
+            self.request_repo.find_by_id(claimed.request_id),
+        )
         if endpoint is None or captured is None:
             # Endpoint or request got cleaned (TTL). Mark dead, do not re-enqueue.
             await self.forward_repo.record_outcome(
