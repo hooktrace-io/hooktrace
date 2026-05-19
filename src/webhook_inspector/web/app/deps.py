@@ -144,14 +144,36 @@ async def get_list_integrations(
     )
 
 
-async def get_replay_request(
-    session: AsyncSession = Depends(get_session),  # noqa: B008
+def get_replay_request(
     settings: Settings = Depends(get_settings),  # noqa: B008
 ) -> ReplayRequest:
+    """Build the ReplayRequest use case.
+
+    No longer takes the request-scoped session dependency: ReplayRequest
+    manages its own session lifecycle (one per phase — auth/load and
+    record_outcome) to release the DB connection during HTTP. The
+    ``unit_of_work`` factory opens a fresh session per call.
+    """
+    factory = _session_factory()
+
+    from contextlib import asynccontextmanager
+
+    @asynccontextmanager
+    async def _uow():  # type: ignore[no-untyped-def]
+        async with factory() as s:
+            try:
+                yield (
+                    PostgresEndpointRepository(s),
+                    PostgresRequestRepository(s),
+                    PostgresReplayRepository(s),
+                )
+                await s.commit()
+            except Exception:
+                await s.rollback()
+                raise
+
     return ReplayRequest(
-        endpoint_repo=PostgresEndpointRepository(session),
-        request_repo=PostgresRequestRepository(session),
-        replay_repo=PostgresReplayRepository(session),
+        unit_of_work=_uow,
         target=make_safe_replay_target(),
         blob_storage=make_blob_storage(settings),
         metrics=get_metrics(),

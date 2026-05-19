@@ -5,15 +5,24 @@ endpoint that captured the request), fetches the body (inline preview or
 R2-offloaded), strips hop-by-hop and security-sensitive headers, runs the
 SSRF guard, sends the HTTP call, and persists the outcome as a Replay row.
 
-Every exit path emits a `replay_attempt` metric with a status label so
+Three-phase split mirrors ExecuteForward (see that module for the
+rationale): the DB connection is held only during authorization+lookup
+(TX1) and outcome persistence (TX2). The HTTP step runs with no DB
+session, freeing the pool during slow replays.
+
+Every exit path emits a ``replay_attempt`` metric with a status label so
 PR10's rate-limit tuning has the signal.
 """
 
 import time
+from collections.abc import Callable
+from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from uuid import UUID
 
+from webhook_inspector.domain.entities.captured_request import CapturedRequest
+from webhook_inspector.domain.entities.endpoint import Endpoint
 from webhook_inspector.domain.entities.replay import (
     REPLAY_RESPONSE_BODY_PREVIEW_BYTES,
     Replay,
@@ -42,11 +51,27 @@ class ReplayPayloadTooLargeError(Exception):
     pass
 
 
+# Type alias for ReplayRequest's unit-of-work seam (parallel to
+# ExecuteForward.ForwardUnitOfWork). A ReplayUnitOfWork yields the three
+# repos the use case needs.
+ReplayUnitOfWork = AbstractAsyncContextManager[
+    tuple[EndpointRepository, RequestRepository, ReplayRepository]
+]
+ReplayUnitOfWorkFactory = Callable[[], ReplayUnitOfWork]
+
+
+@dataclass(frozen=True)
+class _AuthorizedState:
+    """Snapshot from TX1 carried through the HTTP phase."""
+
+    endpoint: Endpoint
+    captured: CapturedRequest
+    body: bytes
+
+
 @dataclass
 class ReplayRequest:
-    endpoint_repo: EndpointRepository
-    request_repo: RequestRepository
-    replay_repo: ReplayRepository
+    unit_of_work: ReplayUnitOfWorkFactory
     target: HttpReplayTarget
     blob_storage: BlobStorage
     metrics: MetricsCollector
@@ -60,43 +85,25 @@ class ReplayRequest:
         include_headers: bool = True,
         include_body: bool = True,
     ) -> Replay:
-        # Auth + ownership check.
-        endpoint = await self.endpoint_repo.find_by_token(token)
-        if endpoint is None:
-            self.metrics.replay_attempt(status="endpoint_not_found")
-            raise EndpointNotFoundError(token)
-
-        captured = await self.request_repo.find_by_id(request_id)
-        if captured is None or captured.endpoint_id != endpoint.id:
-            self.metrics.replay_attempt(status="request_not_found")
-            raise RequestNotFoundError(f"request {request_id} not owned by endpoint {token}")
-
-        # Body : inline preview or R2 fetch.
-        if include_body:
-            if captured.blob_key is not None:
-                body = await self.blob_storage.get(captured.blob_key)
-                if body is None:
-                    body = b""
-            else:
-                body = (captured.body_preview or "").encode("utf-8")
-        else:
-            body = b""
-
+        # Phase 1 — auth + load + body fetch (TX1).
+        state = await self._authorize_phase(token=token, request_id=request_id)
+        body = state.body if include_body else b""
         if len(body) > MAX_REPLAY_BODY_BYTES:
             self.metrics.replay_attempt(status="payload_too_large")
             raise ReplayPayloadTooLargeError(f"body {len(body)} > {MAX_REPLAY_BODY_BYTES}")
 
         # Headers : strip hop-by-hop + auth + sender sig.
-        if include_headers:
-            headers = {
+        headers = (
+            {
                 k: v
-                for k, v in captured.headers.items()
+                for k, v in state.captured.headers.items()
                 if k.lower() not in HEADERS_TO_STRIP_FROM_CAPTURED
             }
-        else:
-            headers = {}
+            if include_headers
+            else {}
+        )
 
-        # Validate target (SSRF guard).
+        # Phase 2 — validate + HTTP (no DB session held).
         started = time.monotonic()
         now = datetime.now(UTC)
         try:
@@ -109,14 +116,13 @@ class ReplayRequest:
                 duration_ms=int((time.monotonic() - started) * 1000),
                 now=now,
             )
-            await self.replay_repo.save(replay)
+            await self._record_phase(replay)
             self.metrics.replay_attempt(status="ssrf_blocked")
             return replay
 
-        # Send + persist.
         try:
             status_code, resp_headers, resp_body = await self.target.send(
-                method=captured.method,
+                method=state.captured.method,
                 validated=validated,
                 headers=headers,
                 body=body,
@@ -135,9 +141,6 @@ class ReplayRequest:
             )
             metric_status = "success" if 200 <= status_code < 300 else "target_error"
         except HttpRequestFailedError as e:
-            # Adapter has already translated httpx / OSError into a
-            # port-level exception. The error string preserves the
-            # underlying type name for the audit log.
             replay = Replay.failure(
                 request_id=request_id,
                 target_url=target_url,
@@ -147,6 +150,42 @@ class ReplayRequest:
             )
             metric_status = "network_error"
 
-        await self.replay_repo.save(replay)
+        # Phase 3 — persist outcome (TX2).
+        await self._record_phase(replay)
         self.metrics.replay_attempt(status=metric_status)
         return replay
+
+    async def _authorize_phase(self, *, token: str, request_id: UUID) -> _AuthorizedState:
+        """Open TX1: auth, load captured + body, commit, close."""
+        async with self.unit_of_work() as (endpoint_repo, request_repo, _replay_repo):
+            endpoint = await endpoint_repo.find_by_token(token)
+            if endpoint is None:
+                self.metrics.replay_attempt(status="endpoint_not_found")
+                raise EndpointNotFoundError(token)
+
+            captured = await request_repo.find_by_id(request_id)
+            if captured is None or captured.endpoint_id != endpoint.id:
+                self.metrics.replay_attempt(status="request_not_found")
+                raise RequestNotFoundError(f"request {request_id} not owned by endpoint {token}")
+
+            if captured.blob_key is not None:
+                body = await self.blob_storage.get(captured.blob_key) or b""
+            else:
+                body = (captured.body_preview or "").encode("utf-8")
+
+        return _AuthorizedState(endpoint=endpoint, captured=captured, body=body)
+
+    async def _record_phase(self, replay: Replay) -> None:
+        """Open TX2: persist the Replay row, commit, close."""
+        async with self.unit_of_work() as (_endpoint_repo, _request_repo, replay_repo):
+            await replay_repo.save(replay)
+
+
+__all__ = [
+    "MAX_REPLAY_BODY_BYTES",
+    "ReplayPayloadTooLargeError",
+    "ReplayRequest",
+    "ReplayUnitOfWork",
+    "ReplayUnitOfWorkFactory",
+    "RequestNotFoundError",
+]
