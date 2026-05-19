@@ -47,17 +47,6 @@ updates:
       prefix: chore
       include: scope
 
-  # Terraform providers
-  - package-ecosystem: terraform
-    directory: "/infra/terraform"
-    schedule:
-      interval: weekly
-      day: monday
-      time: "06:00"
-      timezone: Europe/Paris
-    open-pull-requests-limit: 3
-    labels:
-      - dependencies
-      - infra
-    commit-message:
-      prefix: chore(infra)
+# Note: the previous Terraform entry pointed at `infra/terraform/` which no
+# longer exists post GCP→Fly migration (cf. CLAUDE.md). The archive at
+# `infra/terraform-legacy/` is intentionally read-only — no updates needed.

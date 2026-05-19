@@ -1,0 +1,55 @@
+name: trivy
+
+# Scan the prod Docker image for OS + Python library CVEs. On PRs we only
+# trigger when something that affects the image changes (Dockerfile, deps,
+# the workflow itself). On main we run unconditionally. Weekly schedule
+# catches new CVEs against already-deployed images.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+    paths:
+      - "Dockerfile"
+      - "pyproject.toml"
+      - "uv.lock"
+      - ".github/workflows/trivy.yml"
+  schedule:
+    - cron: "0 6 * * 1"  # Monday 06:00 UTC — before the working week starts
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Build prod image
+        run: docker build -t hooktrace-scan:${{ github.sha }} .
+
+      - name: Trivy vulnerability scan
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: hooktrace-scan:${{ github.sha }}
+          format: sarif
+          output: trivy-results.sarif
+          # Block merge on HIGH/CRITICAL with an available fix. Unfixed CVEs
+          # don't gate the workflow since there's nothing to upgrade to —
+          # they'd just fail forever. They still show up in the Security tab.
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+          ignore-unfixed: true
+          # The cache speeds repeat scans by ~30s. Bust on Trivy DB version bumps.
+          cache: "true"
+
+      - name: Upload SARIF to GitHub Security tab
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-results.sarif
+          category: trivy
