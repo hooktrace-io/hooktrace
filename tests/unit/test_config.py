@@ -25,10 +25,23 @@ def test_settings_have_sensible_defaults_for_local():
     env = {"DATABASE_URL": "postgresql+psycopg://u:p@h:5432/db"}
     with patch.dict(os.environ, env, clear=True):
         s = Settings()
-        assert s.endpoint_ttl_days == 7
+        # V3 launch-prep PR11: bumped 7 → 30 to give users a real debug window
+        assert s.endpoint_ttl_days == 30
         assert s.max_body_bytes == 10 * 1024 * 1024
         assert s.body_inline_threshold_bytes == 8 * 1024
         assert s.environment == "local"
+
+
+def test_default_ttl_is_30_days(monkeypatch):
+    """V3 launch-prep: endpoint_ttl_days defaults to 30 (was 7).
+
+    Settings default is the SINGLE source of truth — backfill of existing
+    endpoints created with TTL=7 is intentionally NOT done; they keep their
+    original expires_at and roll over to 30-day cohort as new ones replace them.
+    """
+    monkeypatch.setenv("DATABASE_URL", "postgresql+psycopg://x@y/z")
+    s = Settings()
+    assert s.endpoint_ttl_days == 30
 
 
 def test_settings_defaults_local_blob_backend():

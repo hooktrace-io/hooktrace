@@ -18,7 +18,7 @@ class Settings(BaseSettings):
     secrets_encryption_key: str | None = (
         None  # base64-encoded 32 bytes; required for HMAC + Forward secrets
     )
-    endpoint_ttl_days: int = 7
+    endpoint_ttl_days: int = 30  # was 7 ; bumped V3 to give users a real debug window
     max_body_bytes: int = 10 * 1024 * 1024
     body_inline_threshold_bytes: int = 8 * 1024
     export_max_requests: int = 10_000
