@@ -12,7 +12,10 @@ from typing import Any
 from sqlalchemy import text
 
 from webhook_inspector.config import Settings
-from webhook_inspector.domain.services.phishing_heuristic import PhishingSignal
+from webhook_inspector.domain.services.phishing_heuristic import (
+    MIN_SUSPICIOUS_POSTS,
+    PhishingSignal,
+)
 from webhook_inspector.infrastructure.notifications.discord_webhook import (
     post_discord_alert,
 )
@@ -40,26 +43,40 @@ async def run_abuse_scan(ctx: dict[str, Any]) -> int:
 
     try:
         async with session_factory() as session:
+            # The previous shape joined requests + forwards in ONE query on
+            # endpoint_id. For an endpoint with N requests and M forwards,
+            # the cartesian product produced N*M rows: COUNT(r.id) FILTER ...
+            # then over-counted POSTs by a factor of M, false-flagging
+            # endpoints with otherwise-healthy forward traffic. Aggregate
+            # each table separately in a CTE, then LEFT JOIN on endpoint_id
+            # so each side sees its own row count.
             rows = await session.execute(
                 text("""
+                    WITH post_counts AS (
+                        SELECT endpoint_id, COUNT(*) AS post_count
+                        FROM requests
+                        WHERE received_at > :cutoff
+                          AND method IN ('POST', 'PUT', 'PATCH')
+                        GROUP BY endpoint_id
+                    ),
+                    forward_ok_counts AS (
+                        SELECT endpoint_id, COUNT(*) AS forward_ok_count
+                        FROM forwards
+                        WHERE forward_completed_at > :cutoff
+                          AND status = 'succeeded'
+                        GROUP BY endpoint_id
+                    )
                     SELECT
                         e.id AS endpoint_id,
-                        COUNT(r.id) FILTER (
-                            WHERE r.method IN ('POST', 'PUT', 'PATCH')
-                        ) AS post_count,
-                        COUNT(f.id) FILTER (
-                            WHERE f.status = 'succeeded'
-                        ) AS forward_ok_count
+                        COALESCE(p.post_count, 0) AS post_count,
+                        COALESCE(f.forward_ok_count, 0) AS forward_ok_count
                     FROM endpoints e
-                    LEFT JOIN requests r ON r.endpoint_id = e.id AND r.received_at > :cutoff
-                    LEFT JOIN forwards f ON f.endpoint_id = e.id AND f.forward_completed_at > :cutoff
+                    LEFT JOIN post_counts p ON p.endpoint_id = e.id
+                    LEFT JOIN forward_ok_counts f ON f.endpoint_id = e.id
                     WHERE e.flagged_at IS NULL
-                    GROUP BY e.id
-                    HAVING COUNT(r.id) FILTER (
-                        WHERE r.method IN ('POST', 'PUT', 'PATCH')
-                    ) >= 20
+                      AND COALESCE(p.post_count, 0) >= :min_posts
                 """),
-                {"cutoff": cutoff},
+                {"cutoff": cutoff, "min_posts": MIN_SUSPICIOUS_POSTS},
             )
 
             suspicious: list[PhishingSignal] = []
