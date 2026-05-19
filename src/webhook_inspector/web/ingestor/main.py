@@ -30,6 +30,26 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Validate secrets key at startup so a misconfigured deploy fails fast.
     _validate_secrets_key(settings.secrets_encryption_key)
 
+    # Prod fail-fast: see web/app/main.py for the rationale. The ingestor
+    # publishes forward jobs on capture, so REDIS_URL is mandatory in
+    # prod; without it forward enqueue silently no-ops. The rate-limit
+    # middleware (/h/) fails closed (503) when its Redis is unset, but we
+    # still fail-fast in prod so the operator notices misconfiguration at
+    # deploy rather than serving 503s in production.
+    if settings.environment == "prod":
+        if not settings.redis_url:
+            raise RuntimeError(
+                "REDIS_URL is required in production but is not set. "
+                "Without it, forward jobs cannot be enqueued; the feature "
+                "is silently disabled."
+            )
+        if not settings.rate_limit_redis_url:
+            raise RuntimeError(
+                "RATE_LIMIT_REDIS_URL is required in production but is not "
+                "set. Without it, the rate limit middleware bypasses all "
+                "checks."
+            )
+
     if settings.redis_url:
         from arq import create_pool
         from arq.connections import RedisSettings

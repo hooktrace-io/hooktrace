@@ -98,6 +98,17 @@ async def startup(ctx: dict[str, object]) -> None:
     configure_metrics(service_name=settings.service_name + "-worker")
     logger.info("worker_startup", extra={"service": settings.service_name + "-worker"})
 
+    # Prod fail-fast: without REDIS_URL the worker has nothing to drain
+    # (arq's RedisSettings would still bind, but it would point at the
+    # default localhost — silently disconnected from the production queue
+    # populated by ingestor/web). Worker doesn't read the rate-limit
+    # Redis, so RATE_LIMIT_REDIS_URL is intentionally not checked here.
+    if settings.environment == "prod" and not settings.redis_url:
+        raise RuntimeError(
+            "REDIS_URL is required in production but is not set. "
+            "Without it, the worker cannot drain the forward queue."
+        )
+
     engine = make_engine(settings)
     session_factory: async_sessionmaker[AsyncSession] = async_sessionmaker(
         engine, expire_on_commit=False, class_=AsyncSession

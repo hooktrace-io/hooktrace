@@ -40,6 +40,26 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Validate secrets key at startup so a misconfigured deploy fails fast.
     _validate_secrets_key(settings.secrets_encryption_key)
 
+    # Prod fail-fast: without REDIS_URL the forward enqueue silently
+    # falls back to NullForwardQueue and forward jobs are dropped on the
+    # floor. Without RATE_LIMIT_REDIS_URL the rate-limit middleware
+    # bypasses every check (fail-open on /api/endpoints/). Both must be
+    # set in prod; in dev/test/local we keep the silent fallback so the
+    # stack runs without Redis.
+    if settings.environment == "prod":
+        if not settings.redis_url:
+            raise RuntimeError(
+                "REDIS_URL is required in production but is not set. "
+                "Without it, forward jobs cannot be enqueued; the feature "
+                "is silently disabled."
+            )
+        if not settings.rate_limit_redis_url:
+            raise RuntimeError(
+                "RATE_LIMIT_REDIS_URL is required in production but is not "
+                "set. Without it, the rate limit middleware bypasses all "
+                "checks."
+            )
+
     # Build notifier once and store on app.state so request-scoped deps can read it.
     sync_dsn = settings.database_url.replace("+psycopg_async", "").replace("+psycopg", "")
     notifier = PostgresNotifier(dsn=sync_dsn)

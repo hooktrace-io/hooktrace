@@ -1,6 +1,18 @@
 app            = "webhook-inspector-web"
 primary_region = "cdg"
 
+# Required Fly secrets (NOT in this file — set via `fly secrets set`):
+#   - DATABASE_URL                  Postgres async DSN (postgres+psycopg://...)
+#   - SECRETS_ENCRYPTION_KEY        32 bytes base64; AES-256 for HMAC + forward secrets
+#   - REDIS_URL                     Upstash rediss:// URL — arq forward queue
+#   - RATE_LIMIT_REDIS_URL          Same Upstash instance, separate logical use — rate-limit middleware
+#   - S3_ENDPOINT_URL               Cloudflare R2 account-scoped endpoint
+#   - S3_BUCKET_NAME                R2 bucket name
+#   - S3_ACCESS_KEY_ID              R2 access key
+#   - S3_SECRET_ACCESS_KEY          R2 secret access key
+# Lifespan asserts REDIS_URL + RATE_LIMIT_REDIS_URL are set when ENVIRONMENT="prod"
+# and refuses to serve traffic otherwise (no silent degradation).
+
 [build]
   dockerfile = "../../Dockerfile"
 
