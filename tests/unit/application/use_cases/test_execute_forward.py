@@ -162,7 +162,7 @@ async def test_happy_path_200() -> None:
         target=target,
         metrics=metrics,
     )
-    await uc.execute(fwd.id)
+    await uc.execute(forward_id=fwd.id)
 
     outcome = await fwd_repo.find_by_id(fwd.id)
     assert outcome is not None
@@ -196,7 +196,7 @@ async def test_retryable_503_first_attempt() -> None:
         target=target,
         metrics=metrics,
     )
-    await uc.execute(fwd.id)
+    await uc.execute(forward_id=fwd.id)
 
     outcome = await fwd_repo.find_by_id(fwd.id)
     assert outcome is not None
@@ -231,7 +231,7 @@ async def test_network_error_first_attempt() -> None:
         target=target,
         metrics=metrics,
     )
-    await uc.execute(fwd.id)
+    await uc.execute(forward_id=fwd.id)
 
     outcome = await fwd_repo.find_by_id(fwd.id)
     assert outcome is not None
@@ -267,7 +267,7 @@ async def test_5th_attempt_503_exhausts_budget() -> None:
         target=target,
         metrics=metrics,
     )
-    await uc.execute(fwd.id)
+    await uc.execute(forward_id=fwd.id)
 
     outcome = await fwd_repo.find_by_id(fwd.id)
     assert outcome is not None
@@ -300,7 +300,7 @@ async def test_4xx_hard_fail_is_immediately_dead() -> None:
         target=target,
         metrics=metrics,
     )
-    await uc.execute(fwd.id)
+    await uc.execute(forward_id=fwd.id)
 
     outcome = await fwd_repo.find_by_id(fwd.id)
     assert outcome is not None
@@ -334,7 +334,7 @@ async def test_ssrf_block_records_dead_with_error_message() -> None:
         target=target,
         metrics=metrics,
     )
-    await uc.execute(fwd.id)
+    await uc.execute(forward_id=fwd.id)
 
     outcome = await fwd_repo.find_by_id(fwd.id)
     assert outcome is not None
@@ -370,7 +370,7 @@ async def test_claim_fails_duplicate_fire_is_skipped() -> None:
         target=target,
         metrics=metrics,
     )
-    await uc.execute(fwd.id)
+    await uc.execute(forward_id=fwd.id)
 
     # No outcome recorded (claim returned None → returned early)
     assert metrics.forward_attempt_calls == ["skipped"]
@@ -403,7 +403,7 @@ async def test_endpoint_deleted_ttl_records_dead() -> None:
         target=target,
         metrics=metrics,
     )
-    await uc.execute(fwd.id)
+    await uc.execute(forward_id=fwd.id)
 
     outcome = await fwd_repo.find_by_id(fwd.id)
     assert outcome is not None
@@ -437,7 +437,7 @@ async def test_request_deleted_ttl_records_dead() -> None:
         target=target,
         metrics=metrics,
     )
-    await uc.execute(fwd.id)
+    await uc.execute(forward_id=fwd.id)
 
     outcome = await fwd_repo.find_by_id(fwd.id)
     assert outcome is not None
@@ -468,7 +468,7 @@ async def test_hmac_signature_applied_when_endpoint_has_forward_secret() -> None
         target=target,
         secrets_key=_SECRETS_KEY,
     )
-    await uc.execute(fwd.id)
+    await uc.execute(forward_id=fwd.id)
 
     assert target.last_call is not None
     assert "X-Hooktrace-Signature" in target.last_call.headers
@@ -502,7 +502,7 @@ async def test_body_fetched_from_r2_when_blob_key_set() -> None:
         target=target,
         blob_storage=blob,
     )
-    await uc.execute(fwd.id)
+    await uc.execute(forward_id=fwd.id)
 
     assert target.last_call is not None
     assert target.last_call.body == r2_body
@@ -534,7 +534,7 @@ async def test_header_fusion_authorization_stripped_endpoint_wins() -> None:
         forward_repo=fwd_repo,
         target=target,
     )
-    await uc.execute(fwd.id)
+    await uc.execute(forward_id=fwd.id)
 
     assert target.last_call is not None
     headers_sent = target.last_call.headers

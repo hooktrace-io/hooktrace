@@ -73,7 +73,7 @@ async def execute_forward(ctx: dict[str, Any], forward_id_str: str) -> None:
                 metrics=ctx["_metrics_collector"],
                 secrets_key=ctx["_secrets_key"],
             )
-            await use_case.execute(UUID(forward_id_str))
+            await use_case.execute(forward_id=UUID(forward_id_str))
             await session.commit()
         except Exception:
             await session.rollback()

@@ -56,7 +56,7 @@ class ExecuteForward:
     metrics: MetricsCollector
     secrets_key: bytes  # 32 bytes, from Settings
 
-    async def execute(self, forward_id: UUID) -> None:
+    async def execute(self, *, forward_id: UUID) -> None:
         now = datetime.now(UTC)
 
         claimed = await self.forward_repo.claim_for_attempt(forward_id, now=now)

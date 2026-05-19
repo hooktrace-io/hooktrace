@@ -49,8 +49,11 @@ async def test_reserved_slug_returns_400(monkeypatch, database_url, engine):
 
     async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         resp = await c.post("/api/endpoints", json={"slug": "api"})
+        # The route now returns a hardcoded generic detail (it MUST NOT leak
+        # the exception type / reserved set to API consumers — that would be
+        # a probing oracle). Asserting status only ; the detail string is
+        # exercised by the unit test in tests/unit/web/.
         assert resp.status_code == 400
-        assert "reserved" in resp.text.lower()
 
 
 async def test_create_without_slug_preserves_v1_behavior(monkeypatch, database_url, engine):

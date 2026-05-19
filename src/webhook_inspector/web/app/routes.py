@@ -185,9 +185,18 @@ async def create_endpoint(
             response_delay_ms=response_spec.delay_ms,
         )
     except SlugAlreadyTakenError as e:
-        raise HTTPException(status_code=409, detail=str(e)) from e
+        # Hardcoded detail — do NOT leak str(e) which embeds the raw token,
+        # giving probers a confirmation oracle for slug guesses.
+        raise HTTPException(status_code=409, detail="slug already taken") from e
     except EndpointValidationError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
+        # Hardcoded detail — the exception hierarchy contains a half-dozen
+        # subclasses (InvalidSlug, ReservedSlug, SlugDenylisted, ...). A single
+        # generic message keeps the response stable across releases and avoids
+        # exposing the active denylist / reserved set.
+        raise HTTPException(
+            status_code=400,
+            detail="invalid slug or response configuration",
+        ) from e
 
     return CreateEndpointResponse(
         url=f"{hook_base_url(request)}/h/{endpoint.token}",
@@ -237,7 +246,7 @@ async def list_integrations_route(
     use_case: ListIntegrations = Depends(get_list_integrations),  # noqa: B008
 ) -> list[IntegrationAggregateResponse]:
     try:
-        aggregates = await use_case.execute_for_token(token)
+        aggregates = await use_case.execute(token=token)
     except EndpointNotFoundError as e:
         raise HTTPException(status_code=404, detail="endpoint not found") from e
     return [
@@ -758,7 +767,7 @@ async def integrations_view(
     use_case: ListIntegrations = Depends(get_list_integrations),  # noqa: B008
 ) -> HTMLResponse:
     try:
-        aggregates = await use_case.execute_for_token(token)
+        aggregates = await use_case.execute(token=token)
     except EndpointNotFoundError as e:
         raise HTTPException(status_code=404, detail="endpoint not found") from e
 
