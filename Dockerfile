@@ -8,7 +8,11 @@ RUN apt-get update \
     && apt-get upgrade -y \
     && apt-get install -y --no-install-recommends build-essential libpq-dev \
     && rm -rf /var/lib/apt/lists/*
-RUN pip install uv
+# Upgrade pip before installing uv — the python:3.13-slim base ships a pip
+# that lags behind CVE patches (CVE-2026-6357 was the last find). Trivy scans
+# the runtime image, but pip leaks into runtime via the base image regardless
+# of where it's used, so we upgrade in both stages.
+RUN pip install --upgrade pip && pip install uv
 
 WORKDIR /app
 COPY pyproject.toml uv.lock README.md ./
@@ -26,6 +30,10 @@ RUN apt-get update \
     && apt-get upgrade -y \
     && apt-get install -y --no-install-recommends libpq5 \
     && rm -rf /var/lib/apt/lists/*
+# pip is shipped by the python:3.13-slim base image even though we don't
+# install anything with it here — Trivy scans it and flags any CVE. Upgrade
+# to the latest pip in the runtime image too.
+RUN pip install --upgrade pip
 
 WORKDIR /app
 COPY --from=builder /app /app
