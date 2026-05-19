@@ -8,6 +8,7 @@ from webhook_inspector.domain.exceptions import (
     InvalidSlugError,
     ReservedSlugError,
     SlugAlreadyTakenError,
+    SlugDenylistedError,
 )
 
 
@@ -77,10 +78,10 @@ async def test_creates_endpoint_with_user_supplied_slug():
     repo = FakeEndpointRepo()
     use_case = CreateEndpoint(repo=repo, ttl_days=7, metrics=FakeMetricsCollector())
 
-    result = await use_case.execute(slug="my-stripe-test")
+    result = await use_case.execute(slug="my-app-webhooks")
 
-    assert result.token == "my-stripe-test"
-    assert repo.saved[0].token == "my-stripe-test"
+    assert result.token == "my-app-webhooks"
+    assert repo.saved[0].token == "my-app-webhooks"
 
 
 async def test_rejects_invalid_slug():
@@ -117,3 +118,13 @@ async def test_propagates_slug_already_taken_from_repo():
         await use_case.execute(slug="foo")
 
     assert metrics.endpoints_created_count == 0
+
+
+async def test_execute_raises_on_denylisted_slug():
+    repo = FakeEndpointRepo()
+    metrics = FakeMetricsCollector()
+    use_case = CreateEndpoint(repo=repo, ttl_days=7, metrics=metrics)
+    with pytest.raises(SlugDenylistedError):
+        await use_case.execute(slug="my-stripe-clone")
+    assert repo.saved == []  # no endpoint persisted on denylist hit
+    assert metrics.endpoints_created_count == 0  # no metric emitted

@@ -7,8 +7,10 @@ from webhook_inspector.domain.entities.endpoint import (
     DEFAULT_RESPONSE_STATUS_CODE,
     Endpoint,
 )
+from webhook_inspector.domain.exceptions import SlugDenylistedError
 from webhook_inspector.domain.ports.endpoint_repository import EndpointRepository
 from webhook_inspector.domain.ports.metrics_collector import MetricsCollector
+from webhook_inspector.domain.services.slug_denylist import is_denylisted
 from webhook_inspector.domain.services.token_generator import generate_token
 
 
@@ -29,6 +31,8 @@ class CreateEndpoint:
     ) -> Endpoint:
         if slug is not None:
             validate_slug(slug)
+            if is_denylisted(slug):
+                raise SlugDenylistedError(f"slug rejected: {slug}")
             token = slug
         else:
             token = generate_token()
