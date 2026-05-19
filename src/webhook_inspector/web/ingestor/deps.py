@@ -101,6 +101,10 @@ async def get_capture_request(
         if settings.secrets_encryption_key
         else b""
     )
+    # ForwardQueue is intentionally NOT injected — the use case persists
+    # the forward row and returns its id on the result object; the route
+    # owns the post-commit enqueue via FastAPI BackgroundTasks. See
+    # application/use_cases/capture_request.py.
     return CaptureRequest(
         endpoint_repo=PostgresEndpointRepository(session),
         request_repo=PostgresRequestRepository(session),
@@ -109,5 +113,4 @@ async def get_capture_request(
         metrics=get_metrics(),
         secrets_key=key,
         forward_repo=PostgresForwardRepository(session),
-        forward_queue=get_forward_queue(),
     )

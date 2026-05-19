@@ -188,10 +188,12 @@ async def get_forward_stats_use_case(
 async def get_retry_forward(
     session: AsyncSession = Depends(get_session),  # noqa: B008
 ) -> RetryForward:
+    # ForwardQueue is intentionally NOT injected — the use case only
+    # transitions DB state; the route owns the post-commit enqueue via
+    # FastAPI BackgroundTasks. See application/use_cases/retry_forward.py.
     return RetryForward(
         endpoint_repo=PostgresEndpointRepository(session),
         forward_repo=PostgresForwardRepository(session),
-        forward_queue=get_forward_queue(),
     )
 
 

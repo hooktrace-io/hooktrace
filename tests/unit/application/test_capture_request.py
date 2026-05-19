@@ -6,7 +6,6 @@ import pytest
 from tests.fakes import (
     FakeBlobStorage,
     FakeEndpointRepo,
-    FakeForwardQueue,
     FakeForwardRepository,
     FakeMetricsCollector,
     FakeRequestRepo,
@@ -39,7 +38,6 @@ def _make_uc(
     blob: FakeBlobStorage | None = None,
     metrics: FakeMetricsCollector | None = None,
     forward_repo: FakeForwardRepository | None = None,
-    forward_queue: FakeForwardQueue | None = None,
 ) -> CaptureRequest:
     return CaptureRequest(
         endpoint_repo=erepo,
@@ -49,7 +47,6 @@ def _make_uc(
         metrics=metrics or FakeMetricsCollector(),
         secrets_key=_NO_KEY,
         forward_repo=forward_repo or FakeForwardRepository(),
-        forward_queue=forward_queue or FakeForwardQueue(),
     )
 
 
@@ -60,7 +57,7 @@ async def test_capture_small_body_inline():
     blob = FakeBlobStorage()
     uc = _make_uc(erepo, rrepo, blob)
 
-    _captured, _endpoint = await uc.execute(
+    result = await uc.execute(
         token="abc",
         method="POST",
         path="/h/abc",
@@ -75,6 +72,7 @@ async def test_capture_small_body_inline():
     assert rrepo.saved[0].blob_key is None
     assert blob.puts == {}
     assert erepo.increments == [ep.id]
+    assert result.pending_forward_id is None  # no forward_url → no enqueue
 
 
 async def test_capture_large_body_uploads_blob():
@@ -85,7 +83,7 @@ async def test_capture_large_body_uploads_blob():
     uc = _make_uc(erepo, rrepo, blob)
 
     big = b"x" * 10000
-    captured, _endpoint = await uc.execute(
+    result = await uc.execute(
         token="abc",
         method="POST",
         path="/h/abc",
@@ -95,8 +93,8 @@ async def test_capture_large_body_uploads_blob():
         source_ip="192.0.2.1",
     )
 
-    assert captured.blob_key is not None
-    assert blob.puts[captured.blob_key] == big
+    assert result.captured.blob_key is not None
+    assert blob.puts[result.captured.blob_key] == big
 
 
 async def test_capture_falls_back_when_blob_storage_fails():
@@ -107,7 +105,7 @@ async def test_capture_falls_back_when_blob_storage_fails():
     uc = _make_uc(erepo, rrepo, blob)
 
     big = b"x" * 10000
-    captured, _endpoint = await uc.execute(
+    result = await uc.execute(
         token="abc",
         method="POST",
         path="/h/abc",
@@ -119,8 +117,8 @@ async def test_capture_falls_back_when_blob_storage_fails():
 
     # Metadata persisted even though blob failed
     assert len(rrepo.saved) == 1
-    assert captured.blob_key is None  # downgraded
-    assert captured.body_size == 10000
+    assert result.captured.blob_key is None  # downgraded
+    assert result.captured.body_size == 10000
 
 
 async def test_capture_unknown_token_raises():
@@ -144,7 +142,7 @@ async def test_capture_uppercases_method():
     erepo = FakeEndpointRepo(ep)
     uc = _make_uc(erepo)
 
-    captured, _endpoint = await uc.execute(
+    result = await uc.execute(
         token="abc",
         method="post",
         path="/h/abc",
@@ -154,7 +152,7 @@ async def test_capture_uppercases_method():
         source_ip="192.0.2.1",
     )
 
-    assert captured.method == "POST"
+    assert result.captured.method == "POST"
 
 
 async def test_capture_request_records_metric():
@@ -192,7 +190,7 @@ async def test_capture_detects_stripe_integration():
     erepo = FakeEndpointRepo(ep)
     uc = _make_uc(erepo)
 
-    captured, _ = await uc.execute(
+    result = await uc.execute(
         token="abc",
         method="POST",
         path="/h/abc",
@@ -202,8 +200,8 @@ async def test_capture_detects_stripe_integration():
         source_ip="1.2.3.4",
     )
 
-    assert captured.detected_integration == "stripe"
-    assert captured.detected_event_type == "payment_intent.created"
+    assert result.captured.detected_integration == "stripe"
+    assert result.captured.detected_event_type == "payment_intent.created"
 
 
 async def test_capture_stripe_body_without_type_field():
@@ -212,7 +210,7 @@ async def test_capture_stripe_body_without_type_field():
     erepo = FakeEndpointRepo(ep)
     uc = _make_uc(erepo)
 
-    captured, _ = await uc.execute(
+    result = await uc.execute(
         token="abc",
         method="POST",
         path="/h/abc",
@@ -222,8 +220,8 @@ async def test_capture_stripe_body_without_type_field():
         source_ip="1.2.3.4",
     )
 
-    assert captured.detected_integration == "stripe"
-    assert captured.detected_event_type is None
+    assert result.captured.detected_integration == "stripe"
+    assert result.captured.detected_event_type is None
 
 
 async def test_capture_no_integration_headers_returns_none():
@@ -232,7 +230,7 @@ async def test_capture_no_integration_headers_returns_none():
     erepo = FakeEndpointRepo(ep)
     uc = _make_uc(erepo)
 
-    captured, _ = await uc.execute(
+    result = await uc.execute(
         token="abc",
         method="POST",
         path="/h/abc",
@@ -242,8 +240,8 @@ async def test_capture_no_integration_headers_returns_none():
         source_ip="1.2.3.4",
     )
 
-    assert captured.detected_integration is None
-    assert captured.detected_event_type is None
+    assert result.captured.detected_integration is None
+    assert result.captured.detected_event_type is None
 
 
 async def test_capture_blob_fallback_preserves_integration():
@@ -255,7 +253,7 @@ async def test_capture_blob_fallback_preserves_integration():
 
     big = b'{"type": "charge.failed"}' * 500  # > 8192 bytes → triggers blob path
 
-    captured, _ = await uc.execute(
+    result = await uc.execute(
         token="abc",
         method="POST",
         path="/h/abc",
@@ -266,10 +264,10 @@ async def test_capture_blob_fallback_preserves_integration():
     )
 
     # Blob failed, so blob_key is None. But integration must still be set.
-    assert captured.blob_key is None
-    assert captured.detected_integration == "stripe"
+    assert result.captured.blob_key is None
+    assert result.captured.detected_integration == "stripe"
     # Body > 8 KB → extract_stripe_event_type cap → None
-    assert captured.detected_event_type is None
+    assert result.captured.detected_event_type is None
 
 
 # ---------------------------------------------------------------------------
@@ -277,14 +275,16 @@ async def test_capture_blob_fallback_preserves_integration():
 # ---------------------------------------------------------------------------
 
 
-async def test_forward_enqueued_when_endpoint_has_forward_url():
+async def test_pending_forward_id_returned_when_endpoint_has_forward_url():
+    """Forward row is persisted and its id is bubbled up on the result
+    so the route can post-commit enqueue via BackgroundTasks. The use
+    case itself MUST NOT call into any queue."""
     ep = _make_endpoint(forward_url="https://example.com/wh")
     erepo = FakeEndpointRepo(ep)
     fwd_repo = FakeForwardRepository()
-    fwd_queue = FakeForwardQueue()
-    uc = _make_uc(erepo, forward_repo=fwd_repo, forward_queue=fwd_queue)
+    uc = _make_uc(erepo, forward_repo=fwd_repo)
 
-    await uc.execute(
+    result = await uc.execute(
         token="abc",
         method="POST",
         path="/h/abc",
@@ -297,18 +297,19 @@ async def test_forward_enqueued_when_endpoint_has_forward_url():
     assert len(fwd_repo.saved) == 1
     assert fwd_repo.saved[0].target_url == "https://example.com/wh"
     assert fwd_repo.saved[0].status == "pending"
-    assert len(fwd_queue.enqueued) == 1
-    assert fwd_queue.enqueued[0][0] == fwd_repo.saved[0].id
+    # The use case bubbles up the persisted forward_id so the route can
+    # schedule the enqueue post-commit. CaptureRequest must NOT touch
+    # the queue itself.
+    assert result.pending_forward_id == fwd_repo.saved[0].id
 
 
-async def test_forward_not_enqueued_when_endpoint_has_no_forward_url():
+async def test_no_pending_forward_id_when_endpoint_has_no_forward_url():
     ep = _make_endpoint()  # no forward_url
     erepo = FakeEndpointRepo(ep)
     fwd_repo = FakeForwardRepository()
-    fwd_queue = FakeForwardQueue()
-    uc = _make_uc(erepo, forward_repo=fwd_repo, forward_queue=fwd_queue)
+    uc = _make_uc(erepo, forward_repo=fwd_repo)
 
-    await uc.execute(
+    result = await uc.execute(
         token="abc",
         method="POST",
         path="/h/abc",
@@ -319,25 +320,25 @@ async def test_forward_not_enqueued_when_endpoint_has_no_forward_url():
     )
 
     assert len(fwd_repo.saved) == 0
-    assert len(fwd_queue.enqueued) == 0
+    assert result.pending_forward_id is None
 
 
-async def test_forward_enqueue_failure_does_not_crash_capture():
-    """If enqueue raises (e.g. Redis down), capture still succeeds."""
+async def test_forward_save_failure_does_not_crash_capture():
+    """If the forward repo's save raises (e.g. DB constraint), capture
+    still returns and the result reports no pending forward id."""
 
-    class BrokenForwardQueue(FakeForwardQueue):
-        async def enqueue(self, forward_id, *, defer_seconds: int = 0) -> None:
-            raise RuntimeError("redis connection refused")
+    class BrokenForwardRepo(FakeForwardRepository):
+        async def save(self, forward):  # type: ignore[no-untyped-def]
+            raise RuntimeError("db constraint violation")
 
     ep = _make_endpoint(forward_url="https://example.com/wh")
     erepo = FakeEndpointRepo(ep)
     rrepo = FakeRequestRepo()
-    fwd_repo = FakeForwardRepository()
-    fwd_queue = BrokenForwardQueue()
-    uc = _make_uc(erepo, rrepo, forward_repo=fwd_repo, forward_queue=fwd_queue)
+    fwd_repo = BrokenForwardRepo()
+    uc = _make_uc(erepo, rrepo, forward_repo=fwd_repo)
 
     # Must not raise
-    _captured, _ = await uc.execute(
+    result = await uc.execute(
         token="abc",
         method="POST",
         path="/h/abc",
@@ -347,25 +348,27 @@ async def test_forward_enqueue_failure_does_not_crash_capture():
         source_ip="1.2.3.4",
     )
 
-    # Capture persisted
+    # Capture persisted; no forward id to enqueue
     assert len(rrepo.saved) == 1
-    # Forward row was saved before the failed enqueue
-    assert len(fwd_repo.saved) == 1
+    assert result.pending_forward_id is None
 
 
-async def test_forward_enqueue_failure_increments_failure_metric():
-    """If enqueue raises, forward_enqueue_failed metric is incremented."""
+async def test_forward_save_failure_increments_failure_metric():
+    """If the forward repo's save raises, forward_enqueue_failed metric is
+    incremented. (The metric name is historical — it covers any failure
+    along the create-then-enqueue path, including the failure-to-create
+    case exercised here.)
+    """
 
-    class BrokenForwardQueue(FakeForwardQueue):
-        async def enqueue(self, forward_id, *, defer_seconds: int = 0) -> None:
-            raise RuntimeError("redis connection refused")
+    class BrokenForwardRepo(FakeForwardRepository):
+        async def save(self, forward):  # type: ignore[no-untyped-def]
+            raise RuntimeError("db constraint violation")
 
     ep = _make_endpoint(forward_url="https://example.com/wh")
     erepo = FakeEndpointRepo(ep)
     metrics = FakeMetricsCollector()
-    fwd_repo = FakeForwardRepository()
-    fwd_queue = BrokenForwardQueue()
-    uc = _make_uc(erepo, metrics=metrics, forward_repo=fwd_repo, forward_queue=fwd_queue)
+    fwd_repo = BrokenForwardRepo()
+    uc = _make_uc(erepo, metrics=metrics, forward_repo=fwd_repo)
 
     await uc.execute(
         token="abc",

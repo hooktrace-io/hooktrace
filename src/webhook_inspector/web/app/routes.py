@@ -7,7 +7,7 @@ from typing import Annotated, Literal, cast
 from uuid import UUID
 
 import markdown
-from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field, HttpUrl
 from sqlalchemy import text
@@ -51,9 +51,11 @@ from webhook_inspector.domain.entities.endpoint import (
 )
 from webhook_inspector.domain.entities.forward import Forward
 from webhook_inspector.domain.exceptions import EndpointValidationError, SlugAlreadyTakenError
+from webhook_inspector.domain.ports.forward_queue import ForwardQueue
 from webhook_inspector.domain.services.hmac.base import ValidationResult
 from webhook_inspector.domain.services.integration_detector import IntegrationName
 from webhook_inspector.infrastructure.notifications.postgres_notifier import PostgresNotifier
+from webhook_inspector.web.app import deps as app_deps_module
 from webhook_inspector.web.app.deps import (
     _session_factory,
     get_abandon_forward,
@@ -75,6 +77,17 @@ from webhook_inspector.web.app.deps import (
 from webhook_inspector.web.app.schemas.endpoint_config import EndpointConfigPatch
 from webhook_inspector.web.app.sse import stream_for_token
 from webhook_inspector.web.middleware.token_rate_limit import enforce_token_limit
+
+
+def _get_forward_queue_dep() -> ForwardQueue:
+    """Indirection so tests can monkeypatch
+    ``webhook_inspector.web.app.deps.get_forward_queue`` and have the swap
+    take effect on this route too. A ``from deps import get_forward_queue``
+    would capture the original reference at import time, defeating the
+    monkeypatch.
+    """
+    return app_deps_module.get_forward_queue()
+
 
 # --- Module-level constants ---------------------------------------------------
 # Per-token cap on outbound replays. IP-keyed middleware already protects the
@@ -526,7 +539,9 @@ async def get_forward_stats_route(
 async def retry_forward_route(
     token: str,
     forward_id: UUID,
+    background_tasks: BackgroundTasks,
     use_case: RetryForward = Depends(get_retry_forward),  # noqa: B008
+    forward_queue: ForwardQueue = Depends(_get_forward_queue_dep),  # noqa: B008
 ) -> ForwardItem:
     try:
         forward = await use_case.execute(token=token, forward_id=forward_id)
@@ -537,7 +552,30 @@ async def retry_forward_route(
         # returned for "wrong status" and "cross-endpoint" so the API cannot be
         # used to probe whether a forward_id exists under a different token.
         raise HTTPException(status_code=404, detail="forward not retryable") from e
+
+    # Post-commit enqueue (see CaptureRequest result docstring for the
+    # race rationale). The use case has flipped status to 'pending' but
+    # the get_session dependency only commits when execute() returns;
+    # BackgroundTasks runs after the response (and therefore after the
+    # commit), so the worker sees a fully-committed row.
+    background_tasks.add_task(_safe_enqueue, forward_queue, forward.id)
     return _to_forward_item(forward)
+
+
+async def _safe_enqueue(forward_queue: ForwardQueue, forward_id: UUID) -> None:
+    """Best-effort enqueue used by background tasks (retry route + any
+    other post-commit enqueue paths). Redis flap must not surface as a
+    500: the row is already in 'pending', so manual redrive recovers it.
+    """
+    import logging
+
+    try:
+        await forward_queue.enqueue(forward_id, defer_seconds=0)
+    except Exception:
+        logging.getLogger(__name__).exception(
+            "forward_enqueue_failed_post_commit",
+            extra={"forward_id": str(forward_id)},
+        )
 
 
 @router.post("/api/endpoints/{token}/forwards/redrive")

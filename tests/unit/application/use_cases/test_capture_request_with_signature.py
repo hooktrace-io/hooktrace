@@ -12,7 +12,6 @@ from tests._helpers.stripe import stripe_signature
 from tests.fakes import (
     FakeBlobStorage,
     FakeEndpointRepo,
-    FakeForwardQueue,
     FakeForwardRepository,
     FakeMetricsCollector,
     FakeRequestRepo,
@@ -58,7 +57,6 @@ def _make_use_case(endpoint: Endpoint) -> tuple[CaptureRequest, FakeRequestRepo]
         metrics=FakeMetricsCollector(),
         secrets_key=_TEST_KEY,
         forward_repo=FakeForwardRepository(),
-        forward_queue=FakeForwardQueue(),
     )
     return uc, rrepo
 
@@ -187,10 +185,9 @@ async def test_capture_unknown_validator_falls_back_to_no_provider(monkeypatch):
         metrics=FakeMetricsCollector(),
         secrets_key=_TEST_KEY,
         forward_repo=FakeForwardRepository(),
-        forward_queue=FakeForwardQueue(),
     )
 
-    captured, _endpoint = await uc.execute(
+    result = await uc.execute(
         token="test-token",
         method="POST",
         path="/h/test-token",
@@ -199,7 +196,7 @@ async def test_capture_unknown_validator_falls_back_to_no_provider(monkeypatch):
         body=b"x",
         source_ip="1.2.3.4",
     )
-    assert captured.signature_status == "no_provider"
+    assert result.captured.signature_status == "no_provider"
 
 
 async def test_capture_request_handles_corrupt_secret():
