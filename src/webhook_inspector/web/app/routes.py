@@ -58,6 +58,7 @@ from webhook_inspector.web.app.deps import (
     get_list_forwards,
     get_list_integrations,
     get_list_requests,
+    get_metrics,
     get_notifier,
     get_redrive_pending_forwards,
     get_replay_request,
@@ -67,6 +68,7 @@ from webhook_inspector.web.app.deps import (
 )
 from webhook_inspector.web.app.schemas.endpoint_config import EndpointConfigPatch
 from webhook_inspector.web.app.sse import stream_for_token
+from webhook_inspector.web.middleware.token_rate_limit import enforce_token_limit
 
 router = APIRouter()
 
@@ -433,6 +435,16 @@ async def replay_request_route(
     body: ReplayBody,
     use_case: ReplayRequest = Depends(get_replay_request),  # noqa: B008
 ) -> ReplayResponse:
+    # Per-token cap (10/h): IP-keyed middleware already protects the API
+    # surface against high-volume scraping; the token-keyed cap limits the
+    # blast radius of a single hijacked token used to spam targets.
+    await enforce_token_limit(
+        token=token,
+        rule_name="replay",
+        limit=10,
+        window_seconds=3600,
+        metrics=get_metrics(),
+    )
     try:
         replay = await use_case.execute(
             token=token,
