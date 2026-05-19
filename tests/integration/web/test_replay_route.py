@@ -28,9 +28,12 @@ async def test_replay_succeeds(app_client, ingestor_client, monkeypatch):
     request_id = resp.json()["items"][0]["id"]
 
     # 4. Stub DNS to a public IP and mock the target
+    async def _fake_resolve(host: str) -> list[str]:
+        return ["93.184.216.34"]
+
     monkeypatch.setattr(
         "webhook_inspector.infrastructure.http.safe_replay_target._resolve",
-        lambda host: ["93.184.216.34"],
+        _fake_resolve,
     )
 
     with respx.mock:
@@ -134,9 +137,12 @@ async def test_replay_records_network_error_as_failure(app_client, ingestor_clie
     resp = await app_client.get(f"/api/endpoints/{token}/requests")
     request_id = resp.json()["items"][0]["id"]
 
+    async def _fake_resolve(host: str) -> list[str]:
+        return ["93.184.216.34"]
+
     monkeypatch.setattr(
         "webhook_inspector.infrastructure.http.safe_replay_target._resolve",
-        lambda host: ["93.184.216.34"],
+        _fake_resolve,
     )
     with respx.mock:
         respx.post("https://example.com/webhook").mock(

@@ -7,6 +7,7 @@ controlled DNS rebinding). See PR4 §"DNS rebinding — accepted V3 gap"
 for the V4 fix options.
 """
 
+import asyncio
 import ipaddress
 import socket
 from urllib.parse import urlsplit
@@ -31,10 +32,27 @@ _DEFAULT_BLOCKED_HOST_SUFFIXES: tuple[str, ...] = ("hooktrace.io",)
 _DEFAULT_TIMEOUT_SECONDS: float = 10.0
 _DEFAULT_MAX_RESPONSE_BYTES: int = 256 * 1024
 
+# Bound on the DNS lookup so a stalled resolver can't pin the event loop. The
+# downstream HTTP timeout (10s default) bounds the connect+read; DNS is the
+# step before either, so the cap is intentionally tight.
+_DNS_TIMEOUT_SECONDS: float = 5.0
 
-def _resolve(host: str) -> list[str]:
-    """Thin wrapper around getaddrinfo so tests can monkeypatch."""
-    infos = socket.getaddrinfo(host, None, type=socket.SOCK_STREAM)
+
+async def _resolve(host: str) -> list[str]:
+    """Async wrapper around getaddrinfo so tests can monkeypatch.
+
+    socket.getaddrinfo is blocking; running it directly on the event loop
+    pins every concurrent request to whatever the resolver is doing. We
+    hop to a thread and time-bound the call — a stalled DNS server raises
+    SsrfBlockedError("dns timeout") rather than wedging the loop.
+    """
+    try:
+        infos = await asyncio.wait_for(
+            asyncio.to_thread(socket.getaddrinfo, host, None, type=socket.SOCK_STREAM),
+            timeout=_DNS_TIMEOUT_SECONDS,
+        )
+    except TimeoutError as e:
+        raise SsrfBlockedError(f"DNS resolution timed out for {host}") from e
     return [str(info[4][0]) for info in infos]
 
 
@@ -61,7 +79,7 @@ class SafeReplayTarget(HttpReplayTarget):
         self._timeout = timeout_seconds
         self._max_response_bytes = max_response_bytes
 
-    def validate(self, url: str) -> ValidatedTarget:
+    async def validate(self, url: str) -> ValidatedTarget:
         parts = urlsplit(url)
         if parts.scheme.lower() not in _ALLOWED_SCHEMES:
             raise SsrfBlockedError(f"scheme not allowed: {parts.scheme}")
@@ -85,7 +103,7 @@ class SafeReplayTarget(HttpReplayTarget):
             ipaddress.ip_address(host)
             ips = [host]
         except ValueError:
-            ips = _resolve(host)
+            ips = await _resolve(host)
 
         if not ips:
             raise SsrfBlockedError(f"DNS returned no addresses for {host}")

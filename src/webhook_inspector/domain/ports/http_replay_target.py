@@ -45,7 +45,7 @@ class HttpReplayTarget(ABC):
     """
 
     @abstractmethod
-    def validate(self, url: str) -> ValidatedTarget: ...
+    async def validate(self, url: str) -> ValidatedTarget: ...
 
     @abstractmethod
     async def send(

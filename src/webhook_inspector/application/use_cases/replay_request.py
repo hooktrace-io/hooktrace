@@ -100,7 +100,7 @@ class ReplayRequest:
         started = time.monotonic()
         now = datetime.now(UTC)
         try:
-            validated = self.target.validate(target_url)
+            validated = await self.target.validate(target_url)
         except SsrfBlockedError as e:
             replay = Replay.failure(
                 request_id=request_id,

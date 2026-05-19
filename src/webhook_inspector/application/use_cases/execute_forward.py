@@ -123,7 +123,7 @@ class ExecuteForward:
         network_error = False
         final_error: str | None = None
         try:
-            validated = self.target.validate(claimed.target_url)
+            validated = await self.target.validate(claimed.target_url)
             status_code, _resp_headers, _resp_body = await self.target.send(
                 method=captured.method,
                 validated=validated,
