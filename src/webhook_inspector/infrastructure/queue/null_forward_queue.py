@@ -19,3 +19,6 @@ class NullForwardQueue(ForwardQueue):
             "forward_enqueue_skipped_no_redis",
             extra={"forward_id": str(forward_id), "defer_seconds": defer_seconds},
         )
+
+    async def aclose(self) -> None:
+        pass

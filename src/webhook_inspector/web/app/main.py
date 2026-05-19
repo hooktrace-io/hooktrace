@@ -63,14 +63,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             await task
         await notifier.stop()
 
-        # Shutdown: close the Redis pool if we opened one.
+        # Shutdown: release the queue's transport (no-op for NullForwardQueue,
+        # closes the Redis pool for ArqForwardQueue).
         if app_deps._forward_queue_singleton is not None:
-            from webhook_inspector.infrastructure.queue.arq_forward_queue import (
-                ArqForwardQueue,
-            )
-
-            if isinstance(app_deps._forward_queue_singleton, ArqForwardQueue):
-                await app_deps._forward_queue_singleton._pool.aclose()
+            await app_deps._forward_queue_singleton.aclose()
             app_deps._forward_queue_singleton = None
 
 

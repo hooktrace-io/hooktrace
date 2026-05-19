@@ -25,3 +25,6 @@ class ArqForwardQueue(ForwardQueue):
             _job_id=f"forward:{forward_id}:{defer_seconds}",
             _defer_by=defer_seconds,
         )
+
+    async def aclose(self) -> None:
+        await self._pool.aclose()

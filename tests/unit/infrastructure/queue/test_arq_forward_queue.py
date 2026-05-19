@@ -77,3 +77,13 @@ async def test_different_defer_seconds_produce_different_job_ids(
     calls = mock_pool.enqueue_job.call_args_list
     job_ids = [c[1]["_job_id"] for c in calls]
     assert len(set(job_ids)) == 2, "different defer_seconds must yield different job_ids"
+
+
+@pytest.mark.asyncio
+async def test_aclose_releases_pool(queue: ArqForwardQueue, mock_pool: AsyncMock) -> None:
+    """aclose() delegates to the underlying Redis pool — lifespan shutdown
+    relies on this to avoid leaking connections.
+    """
+    await queue.aclose()
+
+    mock_pool.aclose.assert_awaited_once()

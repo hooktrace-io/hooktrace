@@ -11,3 +11,6 @@ class FakeForwardQueue(ForwardQueue):
 
     async def enqueue(self, forward_id: UUID, *, defer_seconds: int = 0) -> None:
         self.enqueued.append((forward_id, defer_seconds))
+
+    async def aclose(self) -> None:
+        pass

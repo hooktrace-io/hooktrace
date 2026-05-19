@@ -19,3 +19,12 @@ class ForwardQueue(ABC):
         in-DB side of idempotence; ArqForwardQueue uses arq's `_job_id` for
         the in-Redis side.
         """
+
+    @abstractmethod
+    async def aclose(self) -> None:
+        """Release any underlying transport resource (e.g. a Redis pool).
+
+        Stateless impls (Null/Fake) make this a no-op. Lifespans call it
+        on shutdown so callers don't need to reach into impl-specific
+        private attributes.
+        """
