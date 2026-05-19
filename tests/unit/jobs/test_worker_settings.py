@@ -23,10 +23,10 @@ def test_worker_settings_importable_without_database_url(monkeypatch):
 
     importlib.reload(worker_mod)
 
-    # functions is a list; empty for now — PR7 will populate it with the
-    # forward job.
+    # functions is a list; execute_forward is registered (added in Block 4).
     assert isinstance(worker_mod.WorkerSettings.functions, list)
-    assert worker_mod.WorkerSettings.functions == []
+    fn_names = [f.__name__ for f in worker_mod.WorkerSettings.functions]
+    assert "execute_forward" in fn_names
     assert worker_mod.WorkerSettings.max_tries == 2
     assert worker_mod.WorkerSettings.job_timeout == 120
     assert worker_mod.WorkerSettings.max_jobs == 10

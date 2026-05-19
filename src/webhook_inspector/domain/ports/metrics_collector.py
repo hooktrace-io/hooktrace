@@ -39,3 +39,16 @@ class MetricsCollector(ABC):
         """Increment ssrf_dns_validation_total{result}.
         result values: ok | private | empty | nxdomain
         """
+
+    @abstractmethod
+    def forward_attempt(self, *, status: str) -> None:
+        """Increment forward_attempt_total{status}.
+        status values: succeeded | failed | dead | skipped | ssrf_blocked
+        """
+
+    @abstractmethod
+    def forward_enqueue_failed(self) -> None:
+        """Increment forward_enqueue_failed_total — best-effort enqueue from
+        CaptureRequest failed (Redis down, etc.). The Forward row was saved
+        but no worker job was scheduled; operator must re-enqueue manually.
+        """

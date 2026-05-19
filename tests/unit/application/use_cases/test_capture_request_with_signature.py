@@ -12,6 +12,8 @@ from tests._helpers.stripe import stripe_signature
 from tests.fakes import (
     FakeBlobStorage,
     FakeEndpointRepo,
+    FakeForwardQueue,
+    FakeForwardRepository,
     FakeMetricsCollector,
     FakeRequestRepo,
 )
@@ -55,6 +57,8 @@ def _make_use_case(endpoint: Endpoint) -> tuple[CaptureRequest, FakeRequestRepo]
         inline_threshold=8192,
         metrics=FakeMetricsCollector(),
         secrets_key=_TEST_KEY,
+        forward_repo=FakeForwardRepository(),
+        forward_queue=FakeForwardQueue(),
     )
     return uc, rrepo
 
@@ -182,6 +186,8 @@ async def test_capture_unknown_validator_falls_back_to_no_provider(monkeypatch):
         inline_threshold=8192,
         metrics=FakeMetricsCollector(),
         secrets_key=_TEST_KEY,
+        forward_repo=FakeForwardRepository(),
+        forward_queue=FakeForwardQueue(),
     )
 
     captured, _endpoint = await uc.execute(
