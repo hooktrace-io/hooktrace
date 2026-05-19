@@ -1,7 +1,13 @@
 FROM python:3.13-slim AS builder
 
 ENV PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1
-RUN apt-get update && apt-get install -y --no-install-recommends build-essential libpq-dev && rm -rf /var/lib/apt/lists/*
+# `apt-get upgrade` pulls Debian security patches that python:3.13-slim
+# doesn't always ship at the latest level (CVEs in libc6, etc.). Without
+# this, Trivy flags HIGH/CRITICAL OS CVEs every build.
+RUN apt-get update \
+    && apt-get upgrade -y \
+    && apt-get install -y --no-install-recommends build-essential libpq-dev \
+    && rm -rf /var/lib/apt/lists/*
 RUN pip install uv
 
 WORKDIR /app
@@ -13,7 +19,13 @@ RUN uv sync --frozen --no-dev
 FROM python:3.13-slim AS runtime
 
 ENV PYTHONUNBUFFERED=1 PATH="/app/.venv/bin:$PATH"
-RUN apt-get update && apt-get install -y --no-install-recommends libpq5 && rm -rf /var/lib/apt/lists/*
+# Match the builder's `apt-get upgrade` so the runtime image has Debian
+# security patches applied. The runtime image is what actually ships to
+# prod, so it's the one Trivy scans.
+RUN apt-get update \
+    && apt-get upgrade -y \
+    && apt-get install -y --no-install-recommends libpq5 \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 COPY --from=builder /app /app

@@ -39,13 +39,12 @@ jobs:
           format: sarif
           output: trivy-results.sarif
           severity: HIGH,CRITICAL
-          # exit-code=0 for now — initial CVE triage TBD in a follow-up PR.
-          # The current Python base image carries fixed-but-unfixed-by-us
-          # CVEs (we'd need to bump python:3.13-slim or pin specific patches).
-          # We keep findings visible in the Security tab and the log (next
-          # step), then iterate on the gate threshold once the baseline is
-          # clean.
-          exit-code: "0"
+          # Gate merges on HIGH/CRITICAL with a fix available. The Dockerfile
+          # runs apt-get upgrade in both stages, so Debian security patches
+          # are pulled at build time. If a new CVE appears with a fix Debian
+          # has shipped, this build will catch it; if the fix isn't packaged
+          # yet, ignore-unfixed lets it through silently (still in Security tab).
+          exit-code: "1"
           ignore-unfixed: true
           cache: "true"
 
