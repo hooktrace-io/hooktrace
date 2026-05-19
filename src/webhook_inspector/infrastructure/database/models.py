@@ -39,6 +39,10 @@ class EndpointTable(SQLModel, table=True):
         default=None, sa_column=Column(LargeBinary, nullable=True)
     )
 
+    # V3 — anti-abuse flags (PR10 Block A).
+    flagged_at: datetime | None = Field(default=None)
+    flag_reason: str | None = Field(default=None)
+
 
 class RequestTable(SQLModel, table=True):
     __tablename__ = "requests"
