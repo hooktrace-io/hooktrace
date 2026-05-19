@@ -82,6 +82,54 @@ async def test_capture_rejects_oversized_body(monkeypatch, database_url, engine,
         assert resp.status_code == 413
 
 
+async def test_capture_rejects_oversized_chunked_body_without_content_length(
+    monkeypatch, database_url, engine, tmp_path
+):
+    """When the sender uses Transfer-Encoding: chunked (no Content-Length),
+    the early header gate is bypassed. The streaming reader must still
+    abort once total bytes exceed max_body_bytes — otherwise a chunked
+    upload could buffer arbitrary bytes in memory.
+
+    httpx auto-switches to chunked when given a generator instead of a
+    bytes buffer (no Content-Length emitted). We assert 413 surfaces
+    while the body streams.
+    """
+    monkeypatch.setenv("DATABASE_URL", database_url.replace("+psycopg_async", "+psycopg"))
+    monkeypatch.setenv("BLOB_STORAGE_PATH", str(tmp_path))
+    monkeypatch.setenv("MAX_BODY_BYTES", "1024")
+    from webhook_inspector.web.app import deps as app_deps
+    from webhook_inspector.web.ingestor import deps as ing_deps
+
+    for m in (app_deps, ing_deps):
+        m.get_settings.cache_clear()
+        m._engine.cache_clear()
+        m._session_factory.cache_clear()
+
+    async with httpx.AsyncClient(
+        transport=ASGITransport(app=app_service), base_url="http://test"
+    ) as c:
+        resp = await c.post("/api/endpoints")
+        token = resp.json()["token"]
+
+    async def _chunked_oversized():
+        # 4 chunks of 512 bytes = 2048 bytes total. The first chunk fits;
+        # the third pushes total over the 1024-byte cap and must 413.
+        for _ in range(4):
+            yield b"x" * 512
+
+    async with httpx.AsyncClient(
+        transport=ASGITransport(app=ingestor_service), base_url="http://hook"
+    ) as c:
+        # Passing an async generator → httpx omits Content-Length and uses
+        # Transfer-Encoding: chunked.
+        resp = await c.post(f"/h/{token}", content=_chunked_oversized())
+        assert resp.status_code == 413
+        # Defensive: ensure Content-Length wasn't somehow set; that would
+        # mean we tested the wrong path (the header pre-check would have
+        # caught it before the streaming reader did).
+        assert "content-length" not in resp.request.headers
+
+
 async def test_ingestor_returns_custom_status_body_headers(
     monkeypatch, database_url, engine, tmp_path
 ):

@@ -34,6 +34,29 @@ CAPTURE_LIMIT_PER_HOUR = 1000
 RATE_LIMIT_WINDOW_SECONDS_1H = 3600
 
 
+# --- Streaming body cap -------------------------------------------------------
+# ASGI servers expose the request body as a stream of chunks. `await
+# request.body()` reads the whole stream into memory with no per-chunk
+# cap. A client sending `Transfer-Encoding: chunked` (no Content-Length)
+# bypasses the early header check in `capture()` and can buffer
+# arbitrarily-large bodies in the worker.
+#
+# Read incrementally; abort the moment the accumulated total crosses
+# `max_bytes`. Drops the bytes already read, returns 413. Bounds peak
+# memory at ~max_bytes per concurrent capture.
+
+
+async def _read_body_with_cap(request: Request, *, max_bytes: int) -> bytes:
+    chunks: list[bytes] = []
+    total = 0
+    async for chunk in request.stream():
+        total += len(chunk)
+        if total > max_bytes:
+            raise HTTPException(status_code=413, detail="payload too large")
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
 router = APIRouter()
 
 
@@ -95,13 +118,16 @@ async def capture(
         metrics=get_metrics(),
     )
 
+    # Fast-path: reject if the sender declared an oversized body via
+    # Content-Length, before we read a single byte. Saves the round-trip
+    # of streaming N MB just to reject it. The streaming reader below
+    # catches the chunked / no-Content-Length case where this header is
+    # absent or honest only by accident.
     content_length = request.headers.get("content-length")
     if content_length and int(content_length) > settings.max_body_bytes:
         raise HTTPException(status_code=413, detail="payload too large")
 
-    body = await request.body()
-    if len(body) > settings.max_body_bytes:
-        raise HTTPException(status_code=413, detail="payload too large")
+    body = await _read_body_with_cap(request, max_bytes=settings.max_body_bytes)
 
     try:
         _captured, endpoint = await use_case.execute(
