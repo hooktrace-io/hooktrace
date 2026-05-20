@@ -45,7 +45,11 @@ class HttpReplayTarget(ABC):
     """
 
     @abstractmethod
-    async def validate(self, url: str) -> ValidatedTarget: ...
+    async def validate(self, url: str) -> ValidatedTarget:
+        """Parse-time SSRF check + DNS resolution. Raises SsrfBlockedError
+        on any disallowed scheme, port, host suffix, or private/reserved IP.
+        Returns the ValidatedTarget that send() should be called with.
+        """
 
     @abstractmethod
     async def send(
@@ -55,4 +59,9 @@ class HttpReplayTarget(ABC):
         validated: ValidatedTarget,
         headers: dict[str, str],
         body: bytes,
-    ) -> tuple[int, dict[str, str], bytes]: ...
+    ) -> tuple[int, dict[str, str], bytes]:
+        """Issue the HTTP call against an already-validated target. Returns
+        (status_code, response_headers, response_body) with the body
+        truncated to the implementation's response size cap. Raises
+        HttpRequestFailedError(kind=...) on any transport failure.
+        """
