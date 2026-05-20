@@ -12,7 +12,11 @@ from webhook_inspector.config import Settings
 from webhook_inspector.infrastructure.notifications.postgres_notifier import PostgresNotifier
 from webhook_inspector.observability.logging import configure_logging
 from webhook_inspector.observability.metrics import configure_metrics
-from webhook_inspector.observability.tracing import configure_tracing, instrument_app
+from webhook_inspector.observability.tracing import (
+    configure_tracing,
+    instrument_fastapi,
+    instrument_sqlalchemy,
+)
 from webhook_inspector.web._secrets_key import _validate_secrets_key
 from webhook_inspector.web.app import deps as app_deps
 from webhook_inspector.web.app.deps import _engine, get_metrics
@@ -66,7 +70,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await notifier.start()
     app.state.notifier = notifier
 
-    instrument_app(app, _engine())
+    instrument_sqlalchemy(_engine())
 
     # Wire ForwardQueue for operator-driven Retry / Redrive actions on the DLQ
     # page. The web app enqueues into the same Redis pool the worker drains;
@@ -131,6 +135,11 @@ async def _active_endpoints_gauge_loop() -> None:
 
 
 app = FastAPI(title="Webhook Inspector — App", lifespan=lifespan)
+# FastAPI OTEL instrumentation wired at module-eval, NOT in lifespan: Starlette
+# caches `app.middleware_stack` on the first `app.__call__`, and the lifespan
+# startup dispatch IS that first call — so instrument_app inside lifespan runs
+# after the stack is cached without OTEL, silently dropping HTTP server spans.
+instrument_fastapi(app)
 # Rate limit wired at module-eval, NOT in lifespan: FastAPI raises
 # RuntimeError on add_middleware once the app has started. The middleware
 # matches only the /api/endpoints/ prefix — the /{token} viewer page and
