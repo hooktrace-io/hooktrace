@@ -270,6 +270,25 @@ class PostgresForwardRepository(ForwardRepository):
         result = await self._session.execute(stmt)
         return [row[0] for row in result.all()]
 
+    async def list_overdue_failed(
+        self,
+        endpoint_id: UUID,
+        *,
+        now: datetime,
+    ) -> list[UUID]:
+        stmt = (
+            select(ForwardTable.id)  # type: ignore[call-overload]
+            .where(
+                ForwardTable.endpoint_id == endpoint_id,
+                ForwardTable.status == "failed",
+                ForwardTable.next_attempt_at.isnot(None),  # type: ignore[union-attr]
+                ForwardTable.next_attempt_at <= now,  # type: ignore[operator]
+            )
+            .order_by(ForwardTable.next_attempt_at.asc())  # type: ignore[union-attr]
+        )
+        rows = (await self._session.execute(stmt)).scalars().all()
+        return list(rows)
+
 
 def _to_entity(row: ForwardTable) -> Forward:
     return Forward(

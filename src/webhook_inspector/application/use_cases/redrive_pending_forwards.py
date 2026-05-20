@@ -47,27 +47,33 @@ class RedrivePendingForwards:
             raise EndpointNotFoundError(token)
 
         now = datetime.now(UTC)
-        # First: reclaim any `in_flight` rows stuck past the threshold (worker
-        # crashed mid-attempt). The repo atomically flips them to 'failed' so
-        # the next claim_for_attempt picks them up via the failed branch.
-        reclaimed_ids = await self.forward_repo.reclaim_stuck_in_flight(
+        # Phase 1: reclaim any `in_flight` rows stuck past the threshold
+        # (worker crashed mid-attempt). Atomic UPDATE flips them to 'failed'
+        # with next_attempt_at=now — they fall through to phase 2 as
+        # overdue failed, which guarantees recovery even if phase 3's
+        # enqueue fails (next redrive sweeps them again via list_overdue_failed).
+        await self.forward_repo.reclaim_stuck_in_flight(
             endpoint.id,
             stuck_threshold_seconds=STUCK_IN_FLIGHT_THRESHOLD_SECONDS,
             now=now,
         )
-        # Then: redrive stuck pendings (capture committed but enqueue lost).
+        # Phase 2: all failed rows whose scheduled retry passed (includes
+        # the just-reclaimed in_flight, plus any failed whose normal retry
+        # enqueue was lost to a Redis flap).
+        overdue_failed_ids = await self.forward_repo.list_overdue_failed(endpoint.id, now=now)
+        # Phase 3: stuck pendings (capture committed but enqueue lost).
         pending_ids = await self.forward_repo.redrive_stuck_pending(
             endpoint.id,
             stuck_threshold_seconds=STUCK_PENDING_THRESHOLD_SECONDS,
             now=now,
         )
-        for fid in [*reclaimed_ids, *pending_ids]:
+        for fid in [*overdue_failed_ids, *pending_ids]:
             try:
                 await self.forward_queue.enqueue(fid, defer_seconds=0)
             except Exception:
                 # Redis still down? Log + count; the row stays pending/failed
-                # so the next redrive will catch it. NEVER re-raise — partial
-                # progress is acceptable. logger.exception keeps the
-                # traceback in the structured log and satisfies BLE001.
+                # with next_attempt_at <= now so the NEXT redrive will catch
+                # it via list_overdue_failed / redrive_stuck_pending. NEVER
+                # re-raise — partial progress is acceptable.
                 logger.exception("redrive_enqueue_failed", extra={"forward_id": str(fid)})
-        return len(reclaimed_ids) + len(pending_ids)
+        return len(overdue_failed_ids) + len(pending_ids)

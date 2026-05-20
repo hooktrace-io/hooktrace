@@ -219,3 +219,26 @@ class FakeForwardRepository(ForwardRepository):
                 )
                 reclaimed_ids.append(f.id)
         return reclaimed_ids
+
+    async def list_overdue_failed(
+        self,
+        endpoint_id: UUID,
+        *,
+        now: datetime,
+    ) -> list[UUID]:
+        latest: dict[UUID, Forward] = {}
+        for f in self.saved:
+            latest[f.id] = f
+        for f in self.updated:
+            latest[f.id] = f
+
+        overdue = [
+            f
+            for f in latest.values()
+            if f.endpoint_id == endpoint_id
+            and f.status == "failed"
+            and f.next_attempt_at is not None
+            and f.next_attempt_at <= now
+        ]
+        overdue.sort(key=lambda f: f.next_attempt_at or now)
+        return [f.id for f in overdue]

@@ -137,7 +137,34 @@ class ForwardRepository(ABC):
         → status='failed', next_attempt_at=now. The natural retry path then
         picks them up via claim_for_attempt's pending/failed branch.
 
-        Returns the IDs of reclaimed rows so callers can re-enqueue them.
+        Returns the IDs of reclaimed rows. After this call, list_overdue_failed
+        will also return them (next_attempt_at=now <= now), so if a subsequent
+        enqueue fails the next redrive cycle still catches the row.
+
         Threshold should comfortably exceed the worst-case HTTP timeout
         (10s) to avoid clobbering in-progress attempts on slow networks.
+        """
+
+    @abstractmethod
+    async def list_overdue_failed(
+        self,
+        endpoint_id: UUID,
+        *,
+        now: datetime,
+    ) -> list[UUID]:
+        """Find `status='failed'` rows whose retry was scheduled but no
+        worker job ever fired (enqueue lost during Redis flap, BackgroundTask
+        crash, or arq queue drop).
+
+        Selects: endpoint_id matches AND status='failed' AND
+        next_attempt_at IS NOT NULL AND next_attempt_at <= now.
+
+        Returns the IDs (unchanged state — the caller re-enqueues). The
+        `next_attempt_at <= now` predicate naturally excludes freshly-failed
+        forwards whose backoff window is still in the future.
+
+        Pairs with reclaim_stuck_in_flight: reclaimed rows have
+        next_attempt_at=now, so they're already eligible for this sweep
+        on the next redrive — guaranteeing recovery even if the immediate
+        post-reclaim enqueue fails.
         """
