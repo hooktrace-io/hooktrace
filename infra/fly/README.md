@@ -55,16 +55,52 @@ Fallback (not currently implemented): the cleaner could call
 (roughly 10 LOC). Skipped in V3 because R2-native is cheaper and more
 reliable than running list-and-delete from a cron.
 
-## Observability
+## Observability — Honeycomb wiring
 
-Traces and metrics go to Honeycomb via OTLP. Set `OTLP_ENDPOINT` and
-`OTLP_HEADERS` per app:
+The 3 apps (web, ingestor, worker) export OpenTelemetry traces + metrics
+via OTLP/HTTP when `OTLP_ENDPOINT` is set as a Fly secret. Without it,
+they fall back to console output (visible in `fly logs` but with ~30
+minute retention only).
 
-```bash
-fly secrets set --app webhook-inspector-web \
-  OTLP_ENDPOINT="https://api.honeycomb.io" \
-  OTLP_HEADERS="x-honeycomb-team=<honeycomb-api-key>,x-honeycomb-dataset=webhook-inspector"
-```
+### Setup with Honeycomb free tier (20M events/mo)
+
+1. Sign up at https://ui.honeycomb.io/
+2. Create an environment (e.g. `production`)
+3. Get an API key from Account → Team Settings → API Keys
+4. Set the secrets on each app:
+   ```bash
+   ENDPOINT="https://api.honeycomb.io"
+   KEY="<your-honeycomb-api-key>"
+
+   for app in webhook-inspector-web webhook-inspector-ingestor webhook-inspector-worker; do
+     fly secrets set --app $app \
+       OTLP_ENDPOINT="$ENDPOINT" \
+       OTLP_HEADERS="x-honeycomb-team=$KEY,x-honeycomb-dataset=hooktrace"
+   done
+   ```
+5. Restart rolling on each app (Fly does this automatically on secret set).
+6. Verify in fly logs: look for `"otlp_tracing_configured"` and
+   `"otlp_metrics_configured"` JSON log lines — confirms wiring. The
+   fallback lines are `"otlp_tracing_stdout_fallback"` and
+   `"otlp_metrics_stdout_fallback"`.
+7. In Honeycomb UI, the `hooktrace` dataset should start receiving spans
+   within ~1 minute.
+
+### What's exported
+
+- Spans: FastAPI requests + SQLAlchemy queries + custom span (capture_request)
+- Metrics: `rate_limit_block_total`, `forward_attempt_total`,
+  `request_captured_total`, `body_size` histogram, etc. (see
+  `domain/ports/metrics_collector.py` for the full list)
+- Resource attributes: `service.name`, `deployment.environment`
+
+### Recommended alerts (set up in Honeycomb)
+
+- p95 capture latency > 500ms over 5 min → warning
+- p99 capture latency > 1s over 5 min → critical
+- `forward_attempt_total{status="dead"}` rate > 1/min over 5 min → warning
+- `rate_limit_redis_error_total` rate > 0 over 1 min → warning (Redis flap)
+- `forward_enqueue_failed_total` rate > 5/min over 5 min → critical (queue down)
 
 ## Database
 
