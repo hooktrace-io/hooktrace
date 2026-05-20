@@ -47,6 +47,16 @@ jobs:
           exit-code: "1"
           ignore-unfixed: true
           cache: "true"
+          # With format=sarif, the action defaults to ignoring the severity
+          # filter ("SARIF should be complete for GitHub Security tab"),
+          # which means exit-code=1 triggers on LOW/MEDIUM findings too and
+          # defeats the gate. This re-applies the filter to BOTH the exit
+          # code and the SARIF upload — we accept losing LOW/MEDIUM in the
+          # Security tab in exchange for an exit code that actually matches
+          # the documented gating policy. LOW/MEDIUM on transitive deps are
+          # rarely actionable for a side project; the weekly cron + the
+          # GitHub-native Dependabot alerts cover that ground.
+          limit-severities-for-sarif: "true"
 
       - name: Summarize findings in the log
         if: always()
