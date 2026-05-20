@@ -63,27 +63,41 @@ async def execute_forward(ctx: dict[str, Any], forward_id_str: str) -> None:
     that opens a fresh session per phase. Defensive try/except catches
     uncaught exceptions so arq's max_tries doesn't silently swallow them
     — the use case owns the retry budget via claim/record_outcome.
+
+    Wrapped in an explicit OTEL span here (not in the use case): the use
+    case is application-layer and must not import OTEL. From the trace
+    point of view this span is the root of every forward attempt, and
+    the SQL spans emitted by SQLAlchemyInstrumentor become its children.
+    Enables "P95 worker forward latency" Honeycomb queries that target
+    the whole job, not per-statement DB ops.
     """
+    from opentelemetry import trace
+
     from webhook_inspector.application.use_cases.execute_forward import ExecuteForward
     from webhook_inspector.infrastructure.http.safe_replay_target import make_safe_replay_target
     from webhook_inspector.infrastructure.queue.arq_forward_queue import ArqForwardQueue
 
+    tracer = trace.get_tracer("webhook_inspector.worker")
     session_factory: async_sessionmaker[AsyncSession] = ctx["_session_factory"]
-    try:
-        use_case = ExecuteForward(
-            unit_of_work=lambda: _postgres_unit_of_work(session_factory),
-            forward_queue=ArqForwardQueue(ctx["redis"]),
-            target=make_safe_replay_target(),
-            blob_storage=ctx["_blob_storage"],
-            metrics=ctx["_metrics_collector"],
-            secrets_key=ctx["_secrets_key"],
-        )
-        await use_case.execute(forward_id=UUID(forward_id_str))
-    except Exception:
-        logger.exception(
-            "execute_forward_uncaught",
-            extra={"forward_id": forward_id_str},
-        )
+    with tracer.start_as_current_span(
+        "execute_forward",
+        attributes={"forward.id": forward_id_str},
+    ):
+        try:
+            use_case = ExecuteForward(
+                unit_of_work=lambda: _postgres_unit_of_work(session_factory),
+                forward_queue=ArqForwardQueue(ctx["redis"]),
+                target=make_safe_replay_target(),
+                blob_storage=ctx["_blob_storage"],
+                metrics=ctx["_metrics_collector"],
+                secrets_key=ctx["_secrets_key"],
+            )
+            await use_case.execute(forward_id=UUID(forward_id_str))
+        except Exception:
+            logger.exception(
+                "execute_forward_uncaught",
+                extra={"forward_id": forward_id_str},
+            )
 
 
 @asynccontextmanager
