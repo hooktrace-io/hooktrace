@@ -246,3 +246,51 @@ async def test_first_request_loads_script_once(monkeypatch):
         await c.post("/h/b")
         await c.post("/h/c")
     redis_mock.script_load.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_middleware_does_not_consume_body() -> None:
+    """Pure ASGI middleware must not call ``receive()`` itself — leaving
+    the body untouched for downstream handlers AND for FastAPIInstrumentor.
+
+    This is the load-bearing guarantee that motivates the move off
+    ``BaseHTTPMiddleware``: the base class consumes the body during dispatch,
+    which breaks the OTEL FastAPI instrumentor's HTTP server span lifecycle
+    (see https://github.com/open-telemetry/opentelemetry-python-contrib/issues/831).
+    """
+    receive_calls: list[str] = []
+
+    async def receive() -> dict:
+        receive_calls.append("receive")
+        return {"type": "http.request", "body": b'{"test":1}', "more_body": False}
+
+    sent: list[dict] = []
+
+    async def send(msg: dict) -> None:
+        sent.append(msg)
+
+    async def inner_app(scope, receive_inner, send_inner) -> None:
+        # Inner app reads body — would fail if outer middleware already consumed it.
+        msg = await receive_inner()
+        assert msg["body"] == b'{"test":1}'
+        await send_inner({"type": "http.response.start", "status": 200, "headers": []})
+        await send_inner({"type": "http.response.body", "body": b""})
+
+    metrics = FakeMetricsCollector()
+    mw = RateLimitMiddleware(
+        inner_app,
+        redis_url_provider=lambda: None,  # bypass — no Redis needed
+        rules={"/h/": _Rule(name="ingest", limit=100, window_seconds=60, fail_mode="closed")},
+        metrics_provider=lambda: metrics,
+    )
+
+    scope = {
+        "type": "http",
+        "method": "POST",
+        "path": "/h/test",
+        "headers": [(b"content-type", b"application/json")],
+        "client": ("1.2.3.4", 5678),
+    }
+    await mw(scope, receive, send)
+    # The middleware itself must NOT have called receive — only the inner app did.
+    assert receive_calls == ["receive"]

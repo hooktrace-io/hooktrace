@@ -16,6 +16,14 @@ Why homemade and not slowapi:
 - slowapi defaults to fixed-window which allows 2x limit at the boundary.
 
 We need: sliding window, atomic INCR+TTL, fail-mode per path. ~40 LOC.
+
+Pure ASGI middleware — does NOT subclass ``BaseHTTPMiddleware``. The
+``BaseHTTPMiddleware`` wrapper consumes the request body via async
+iteration, which breaks FastAPIInstrumentor's HTTP server span lifecycle
+(see https://github.com/open-telemetry/opentelemetry-python-contrib/issues/831).
+Implementing the raw ASGI ``__call__(scope, receive, send)`` interface
+leaves the request lifecycle intact so OTEL instrumentation can wrap
+requests correctly.
 """
 
 import time
@@ -25,10 +33,7 @@ from typing import Any, Literal, cast
 from uuid import uuid4
 
 import redis.asyncio as redis
-from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.requests import Request
-from starlette.responses import JSONResponse, Response
-from starlette.types import ASGIApp
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 from webhook_inspector.domain.ports.metrics_collector import MetricsCollector
 from webhook_inspector.web.middleware.client_ip import extract_client_ip
@@ -72,7 +77,11 @@ class _Rule:
     fail_mode: Literal["open", "closed"]
 
 
-class RateLimitMiddleware(BaseHTTPMiddleware):
+class RateLimitMiddleware:
+    """Pure ASGI middleware — does NOT extend BaseHTTPMiddleware so FastAPI
+    OTEL instrumentation can wrap requests without body-consumption conflict.
+    """
+
     def __init__(
         self,
         app: ASGIApp,
@@ -81,7 +90,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         rules: dict[str, _Rule],
         metrics_provider: Callable[[], MetricsCollector],
     ) -> None:
-        super().__init__(app)
+        self.app = app
         self._rules = rules
         self._redis_url_provider = redis_url_provider
         self._metrics_provider = metrics_provider
@@ -115,23 +124,38 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                 return rule
         return None
 
-    async def dispatch(
-        self,
-        request: Request,
-        call_next: Callable[[Request], Awaitable[Response]],
-    ) -> Response:
-        rule = self._match_rule(request.url.path)
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        # Non-HTTP (websocket, lifespan) → bypass.
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        path = cast(str, scope.get("path", ""))
+        rule = self._match_rule(path)
         if rule is None:
-            return await call_next(request)
+            await self.app(scope, receive, send)
+            return
 
-        client_ip = extract_client_ip(request)
+        # ASGI headers come as list[tuple[bytes, bytes]], already lowercased
+        # by Starlette/uvicorn — defensive .lower() preserves correctness if
+        # a non-conforming server is ever swapped in.
+        headers = {
+            k.decode("latin-1").lower(): v.decode("latin-1") for k, v in scope.get("headers", [])
+        }
+        # scope["client"] is (host, port) | None.
+        client = scope.get("client")
+        client_host = client[0] if client else None
+        client_ip = extract_client_ip(headers, client_host)
+
         key = f"rl:{rule.name}:{client_ip}".encode()
-
         metrics = self._metrics_provider()
+
         try:
             r = await self._ensure_redis()
             if r is None:
-                return await call_next(request)
+                # Dev mode — rate limit disabled.
+                await self.app(scope, receive, send)
+                return
             now_ms = int(time.time() * 1000)
             member = f"{now_ms}:{uuid4().hex}"
             # evalsha is typed strictly (str only) but redis-py accepts
@@ -150,18 +174,51 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             metrics.rate_limit_redis_error(rule=rule.name)
             if rule.fail_mode == "closed":
                 metrics.rate_limit_block(rule=rule.name, reason="fail_closed")
-                return JSONResponse(
-                    {"detail": "rate limiter unavailable"},
-                    status_code=503,
-                    headers={"Retry-After": "60"},
+                await self._send_json_response(
+                    send,
+                    status=503,
+                    body=b'{"detail":"rate limiter unavailable"}',
+                    extra_headers=[(b"retry-after", b"60")],
                 )
-            return await call_next(request)
+                return
+            # fail_mode="open" → fall through.
+            await self.app(scope, receive, send)
+            return
 
         if not allowed:
             metrics.rate_limit_block(rule=rule.name, reason="quota")
-            return JSONResponse(
-                {"detail": "rate limit exceeded"},
-                status_code=429,
-                headers={"Retry-After": str(retry_after)},
+            await self._send_json_response(
+                send,
+                status=429,
+                body=b'{"detail":"rate limit exceeded"}',
+                extra_headers=[(b"retry-after", str(retry_after).encode())],
             )
-        return await call_next(request)
+            return
+
+        await self.app(scope, receive, send)
+
+    @staticmethod
+    async def _send_json_response(
+        send: Send,
+        *,
+        status: int,
+        body: bytes,
+        extra_headers: list[tuple[bytes, bytes]],
+    ) -> None:
+        await send(
+            {
+                "type": "http.response.start",
+                "status": status,
+                "headers": [
+                    (b"content-type", b"application/json"),
+                    (b"content-length", str(len(body)).encode()),
+                    *extra_headers,
+                ],
+            }
+        )
+        await send(
+            {
+                "type": "http.response.body",
+                "body": body,
+            }
+        )

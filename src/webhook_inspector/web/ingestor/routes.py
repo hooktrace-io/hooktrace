@@ -152,7 +152,10 @@ async def capture(
             query_string=request.url.query or None,
             headers={k.lower(): v for k, v in request.headers.items()},
             body=body,
-            source_ip=extract_client_ip(request),
+            source_ip=extract_client_ip(
+                request.headers,
+                request.client.host if request.client else None,
+            ),
         )
     except EndpointNotFoundError as e:
         raise HTTPException(status_code=404, detail="endpoint not found") from e
