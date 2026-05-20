@@ -1,25 +1,46 @@
 """V3 self-contained observability — tracing.
 
-No external trace backend in V3. All spans propagate to:
-1. ConsoleSpanExporter — dev visibility, harmless in prod.
+Exports traces via OTLP/HTTP when `OTLP_ENDPOINT` is set (Honeycomb, Grafana
+Cloud, etc.). Without it, falls back to `ConsoleSpanExporter` — visible in
+`fly logs` but only with ~30 minutes of retention.
 
-V4 will reintroduce external export (Honeycomb / Grafana Cloud) with a
-SampledBatchSpanProcessor wrapper if/when product needs it.
+`OTLP_HEADERS` carries vendor credentials, comma-separated `key=value`
+(e.g. `x-honeycomb-team=...,x-honeycomb-dataset=hooktrace`).
 """
 
 import logging
+import os
 
 from fastapi import FastAPI
 from opentelemetry import trace
+from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from opentelemetry.instrumentation.sqlalchemy import SQLAlchemyInstrumentor
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider
-from opentelemetry.sdk.trace.export import ConsoleSpanExporter, SimpleSpanProcessor
+from opentelemetry.sdk.trace.export import (
+    BatchSpanProcessor,
+    ConsoleSpanExporter,
+    SimpleSpanProcessor,
+)
 from opentelemetry.sdk.trace.sampling import ALWAYS_ON
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 logger = logging.getLogger(__name__)
+
+
+def _parse_otlp_headers(raw: str | None) -> dict[str, str]:
+    """Parse the comma-separated `key=value` env var into a dict."""
+    if not raw:
+        return {}
+    out: dict[str, str] = {}
+    for pair in raw.split(","):
+        pair = pair.strip()
+        if not pair or "=" not in pair:
+            continue
+        key, value = pair.split("=", 1)
+        out[key.strip()] = value.strip()
+    return out
 
 
 def configure_tracing(service_name: str, environment: str) -> None:
@@ -37,7 +58,26 @@ def configure_tracing(service_name: str, environment: str) -> None:
         }
     )
     provider = TracerProvider(resource=resource, sampler=ALWAYS_ON)
-    provider.add_span_processor(SimpleSpanProcessor(ConsoleSpanExporter()))
+
+    otlp_endpoint = os.environ.get("OTLP_ENDPOINT")
+    if otlp_endpoint:
+        headers = _parse_otlp_headers(os.environ.get("OTLP_HEADERS"))
+        exporter = OTLPSpanExporter(
+            endpoint=f"{otlp_endpoint.rstrip('/')}/v1/traces",
+            headers=headers,
+        )
+        provider.add_span_processor(BatchSpanProcessor(exporter))
+        logger.info(
+            "otlp_tracing_configured",
+            extra={"endpoint": otlp_endpoint, "service": service_name},
+        )
+    else:
+        provider.add_span_processor(SimpleSpanProcessor(ConsoleSpanExporter()))
+        logger.info(
+            "otlp_tracing_stdout_fallback",
+            extra={"service": service_name, "reason": "OTLP_ENDPOINT not set"},
+        )
+
     trace.set_tracer_provider(provider)
     logger.info("tracing_configured", extra={"service": service_name})
 
