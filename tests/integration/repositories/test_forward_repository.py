@@ -66,6 +66,7 @@ async def _seed_forward(
     final_status_code: int | None = None,
     final_error: str | None = None,
     forward_completed_at: datetime | None = None,
+    forward_started_at: datetime | None = None,
 ) -> Forward:
     repo = PostgresForwardRepository(session)
     now = datetime.now(UTC)
@@ -83,6 +84,7 @@ async def _seed_forward(
         final_status_code=final_status_code,
         final_error=final_error,
         forward_completed_at=forward_completed_at,
+        forward_started_at=forward_started_at,
     )
     await repo.save(forward)
     await session.commit()
@@ -511,6 +513,94 @@ async def test_redrive_stuck_pending_returns_empty_when_none(session):
     ids = await repo.redrive_stuck_pending(
         endpoint.id, stuck_threshold_seconds=300, now=datetime.now(UTC)
     )
+    assert ids == []
+
+
+# ---- reclaim_stuck_in_flight -----------------------------------------------
+
+
+async def test_reclaim_stuck_in_flight_marks_old_in_flight_as_failed(session):
+    endpoint = await _seed_endpoint(session)
+    req = await _seed_request(session, endpoint.id)
+    repo = PostgresForwardRepository(session)
+
+    now = datetime.now(UTC)
+    threshold = 300
+
+    stuck = await _seed_forward(
+        session,
+        endpoint_id=endpoint.id,
+        request_id=req.id,
+        status="in_flight",
+        attempt_count=1,
+        forward_started_at=now - timedelta(seconds=threshold + 60),
+    )
+    # Fresh in_flight — within the threshold, must NOT be reclaimed.
+    await _seed_forward(
+        session,
+        endpoint_id=endpoint.id,
+        request_id=req.id,
+        status="in_flight",
+        attempt_count=1,
+        forward_started_at=now - timedelta(seconds=30),
+    )
+
+    ids = await repo.reclaim_stuck_in_flight(
+        endpoint.id, stuck_threshold_seconds=threshold, now=now
+    )
+    await session.commit()
+
+    assert ids == [stuck.id]
+    reloaded = await repo.find_by_id(stuck.id)
+    assert reloaded is not None
+    assert reloaded.status == "failed"
+    assert reloaded.next_attempt_at == now
+
+
+async def test_reclaim_stuck_in_flight_isolates_across_endpoints(session):
+    endpoint_a = await _seed_endpoint(session)
+    endpoint_b = await _seed_endpoint(session)
+    req_a = await _seed_request(session, endpoint_a.id)
+    req_b = await _seed_request(session, endpoint_b.id)
+    repo = PostgresForwardRepository(session)
+
+    now = datetime.now(UTC)
+    a_stuck = await _seed_forward(
+        session,
+        endpoint_id=endpoint_a.id,
+        request_id=req_a.id,
+        status="in_flight",
+        forward_started_at=now - timedelta(seconds=600),
+    )
+    await _seed_forward(
+        session,
+        endpoint_id=endpoint_b.id,
+        request_id=req_b.id,
+        status="in_flight",
+        forward_started_at=now - timedelta(seconds=600),
+    )
+
+    a_ids = await repo.reclaim_stuck_in_flight(endpoint_a.id, stuck_threshold_seconds=300, now=now)
+    assert a_ids == [a_stuck.id]
+
+
+async def test_reclaim_stuck_in_flight_ignores_non_in_flight(session):
+    """pending / failed / succeeded / dead / abandoned must never be reclaimed."""
+    endpoint = await _seed_endpoint(session)
+    req = await _seed_request(session, endpoint.id)
+    repo = PostgresForwardRepository(session)
+
+    now = datetime.now(UTC)
+    for status in ("pending", "failed", "succeeded", "dead", "abandoned"):
+        await _seed_forward(
+            session,
+            endpoint_id=endpoint.id,
+            request_id=req.id,
+            status=status,  # type: ignore[arg-type]
+            forward_started_at=now - timedelta(seconds=600),
+        )
+
+    ids = await repo.reclaim_stuck_in_flight(endpoint.id, stuck_threshold_seconds=300, now=now)
     assert ids == []
 
 

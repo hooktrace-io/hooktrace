@@ -20,11 +20,19 @@ from webhook_inspector.domain.ports.endpoint_repository import EndpointRepositor
 from webhook_inspector.domain.ports.forward_queue import ForwardQueue
 from webhook_inspector.domain.ports.forward_repository import ForwardRepository
 
-__all__ = ["STUCK_PENDING_THRESHOLD_SECONDS", "RedrivePendingForwards"]
+__all__ = [
+    "STUCK_IN_FLIGHT_THRESHOLD_SECONDS",
+    "STUCK_PENDING_THRESHOLD_SECONDS",
+    "RedrivePendingForwards",
+]
 
 logger = logging.getLogger(__name__)
 
 STUCK_PENDING_THRESHOLD_SECONDS = 5 * 60  # 5 minutes
+# `in_flight` is only legitimate during a single attempt (HTTP timeout = 10s).
+# Anything stuck > 5 min in_flight is a worker crash between claim-commit and
+# record_outcome — reclaim it so the natural retry path picks it back up.
+STUCK_IN_FLIGHT_THRESHOLD_SECONDS = 5 * 60
 
 
 @dataclass
@@ -39,18 +47,27 @@ class RedrivePendingForwards:
             raise EndpointNotFoundError(token)
 
         now = datetime.now(UTC)
-        stuck_ids = await self.forward_repo.redrive_stuck_pending(
+        # First: reclaim any `in_flight` rows stuck past the threshold (worker
+        # crashed mid-attempt). The repo atomically flips them to 'failed' so
+        # the next claim_for_attempt picks them up via the failed branch.
+        reclaimed_ids = await self.forward_repo.reclaim_stuck_in_flight(
+            endpoint.id,
+            stuck_threshold_seconds=STUCK_IN_FLIGHT_THRESHOLD_SECONDS,
+            now=now,
+        )
+        # Then: redrive stuck pendings (capture committed but enqueue lost).
+        pending_ids = await self.forward_repo.redrive_stuck_pending(
             endpoint.id,
             stuck_threshold_seconds=STUCK_PENDING_THRESHOLD_SECONDS,
             now=now,
         )
-        for fid in stuck_ids:
+        for fid in [*reclaimed_ids, *pending_ids]:
             try:
                 await self.forward_queue.enqueue(fid, defer_seconds=0)
             except Exception:
-                # Redis still down? Log + count; the row stays pending so the
-                # next redrive will catch it. NEVER re-raise — partial
+                # Redis still down? Log + count; the row stays pending/failed
+                # so the next redrive will catch it. NEVER re-raise — partial
                 # progress is acceptable. logger.exception keeps the
                 # traceback in the structured log and satisfies BLE001.
                 logger.exception("redrive_enqueue_failed", extra={"forward_id": str(fid)})
-        return len(stuck_ids)
+        return len(reclaimed_ids) + len(pending_ids)

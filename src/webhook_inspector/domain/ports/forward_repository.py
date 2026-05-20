@@ -118,3 +118,26 @@ class ForwardRepository(ABC):
         forward_queue.enqueue() for each). 5-minute threshold avoids racing
         with captures that JUST enqueued.
         """
+
+    @abstractmethod
+    async def reclaim_stuck_in_flight(
+        self,
+        endpoint_id: UUID,
+        *,
+        stuck_threshold_seconds: int,
+        now: datetime,
+    ) -> list[UUID]:
+        """Recover forwards stuck in status='in_flight' past the threshold.
+
+        A worker crash between TX1 (claim → in_flight) and TX2 (record_outcome)
+        leaves the row stuck: arq's retry sees in_flight, claim_for_attempt
+        only matches pending/failed, the row is unreachable.
+
+        Atomic UPDATE: status='in_flight' AND forward_started_at < now - threshold
+        → status='failed', next_attempt_at=now. The natural retry path then
+        picks them up via claim_for_attempt's pending/failed branch.
+
+        Returns the IDs of reclaimed rows so callers can re-enqueue them.
+        Threshold should comfortably exceed the worst-case HTTP timeout
+        (10s) to avoid clobbering in-progress attempts on slow networks.
+        """

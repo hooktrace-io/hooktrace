@@ -52,6 +52,7 @@ from webhook_inspector.domain.entities.endpoint import (
 from webhook_inspector.domain.entities.forward import Forward
 from webhook_inspector.domain.exceptions import EndpointValidationError, SlugAlreadyTakenError
 from webhook_inspector.domain.ports.forward_queue import ForwardQueue
+from webhook_inspector.domain.ports.metrics_collector import MetricsCollector
 from webhook_inspector.domain.services.hmac.base import ValidationResult
 from webhook_inspector.domain.services.integration_detector import IntegrationName
 from webhook_inspector.infrastructure.notifications.postgres_notifier import PostgresNotifier
@@ -558,20 +559,27 @@ async def retry_forward_route(
     # the get_session dependency only commits when execute() returns;
     # BackgroundTasks runs after the response (and therefore after the
     # commit), so the worker sees a fully-committed row.
-    background_tasks.add_task(_safe_enqueue, forward_queue, forward.id)
+    background_tasks.add_task(_safe_enqueue, forward_queue, get_metrics(), forward.id)
     return _to_forward_item(forward)
 
 
-async def _safe_enqueue(forward_queue: ForwardQueue, forward_id: UUID) -> None:
+async def _safe_enqueue(
+    forward_queue: ForwardQueue,
+    metrics: MetricsCollector,
+    forward_id: UUID,
+) -> None:
     """Best-effort enqueue used by background tasks (retry route + any
     other post-commit enqueue paths). Redis flap must not surface as a
     500: the row is already in 'pending', so manual redrive recovers it.
+    On failure, log AND increment forward_enqueue_failed so the failure
+    rate is visible (operator-facing metric, not silently lost).
     """
     import logging
 
     try:
         await forward_queue.enqueue(forward_id, defer_seconds=0)
     except Exception:
+        metrics.forward_enqueue_failed()
         logging.getLogger(__name__).exception(
             "forward_enqueue_failed_post_commit",
             extra={"forward_id": str(forward_id)},

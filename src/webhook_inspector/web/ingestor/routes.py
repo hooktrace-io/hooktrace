@@ -13,6 +13,7 @@ from webhook_inspector.application.use_cases.capture_request import (
 )
 from webhook_inspector.config import Settings
 from webhook_inspector.domain.ports.forward_queue import ForwardQueue
+from webhook_inspector.domain.ports.metrics_collector import MetricsCollector
 from webhook_inspector.web.ingestor import deps as ingestor_deps_module
 from webhook_inspector.web.ingestor.deps import (
     _blob_storage,
@@ -166,7 +167,12 @@ async def capture(
     # dropped the job. Enqueue is best-effort: if Redis is down, the row
     # remains pending and the manual redrive endpoint picks it up.
     if result.pending_forward_id is not None:
-        background_tasks.add_task(_safe_enqueue, forward_queue, result.pending_forward_id)
+        background_tasks.add_task(
+            _safe_enqueue,
+            forward_queue,
+            get_metrics(),
+            result.pending_forward_id,
+        )
 
     if endpoint.response_delay_ms > 0:
         await asyncio.sleep(endpoint.response_delay_ms / 1000)
@@ -178,16 +184,22 @@ async def capture(
     )
 
 
-async def _safe_enqueue(forward_queue: ForwardQueue, forward_id: uuid.UUID) -> None:
+async def _safe_enqueue(
+    forward_queue: ForwardQueue,
+    metrics: MetricsCollector,
+    forward_id: uuid.UUID,
+) -> None:
     """Best-effort enqueue used by capture/retry background tasks.
 
     Redis flap must not surface as a 500 on the capture response (the row
     is already persisted; manual redrive will recover it). Wrap in a broad
-    try/except and log instead.
+    try/except, log AND increment forward_enqueue_failed so operators see
+    the failure rate (otherwise silent failures hide a real outage).
     """
     try:
         await forward_queue.enqueue(forward_id)
     except Exception:
+        metrics.forward_enqueue_failed()
         logger.exception(
             "forward_enqueue_failed_post_commit", extra={"forward_id": str(forward_id)}
         )
