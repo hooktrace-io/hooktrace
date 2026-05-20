@@ -7,7 +7,11 @@ from fastapi import FastAPI
 from webhook_inspector.config import Settings
 from webhook_inspector.observability.logging import configure_logging
 from webhook_inspector.observability.metrics import configure_metrics
-from webhook_inspector.observability.tracing import configure_tracing, instrument_app
+from webhook_inspector.observability.tracing import (
+    add_otel_middleware,
+    configure_tracing,
+    instrument_sqlalchemy,
+)
 from webhook_inspector.web._secrets_key import _validate_secrets_key
 from webhook_inspector.web.ingestor import deps as ingestor_deps
 from webhook_inspector.web.ingestor.deps import _engine, get_metrics
@@ -21,12 +25,14 @@ INGEST_RATE_LIMIT_PER_MINUTE = 100
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # noqa: ARG001 — required by FastAPI lifespan protocol
     settings = Settings()
     configure_logging(settings.log_level, settings.service_name + "-ingestor")
     configure_tracing(settings.service_name + "-ingestor", settings.environment)
     configure_metrics(service_name=settings.service_name + "-ingestor")
-    instrument_app(app, _engine())
+    # OpenTelemetryMiddleware is registered at module-eval (below). Lifespan
+    # only wires SQLAlchemy instrumentation.
+    instrument_sqlalchemy(_engine())
     # Validate secrets key at startup so a misconfigured deploy fails fast.
     _validate_secrets_key(settings.secrets_encryption_key)
 
@@ -69,6 +75,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 
 app = FastAPI(title="Webhook Inspector — Ingestor", lifespan=lifespan)
+# OTEL ASGI middleware FIRST. See web/app/main.py for the rationale —
+# wraps every request to emit one HTTP server span (route template name).
+add_otel_middleware(app)
 # Rate limit wired at module-eval, NOT in lifespan: FastAPI raises
 # RuntimeError on add_middleware once the app has started. The middleware
 # itself is lazy — providers run on first request, so tests that never

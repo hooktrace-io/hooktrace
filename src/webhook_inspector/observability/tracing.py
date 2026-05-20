@@ -14,7 +14,7 @@ import os
 from fastapi import FastAPI
 from opentelemetry import trace
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
-from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+from opentelemetry.instrumentation.asgi import OpenTelemetryMiddleware
 from opentelemetry.instrumentation.sqlalchemy import SQLAlchemyInstrumentor
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider
@@ -82,8 +82,33 @@ def configure_tracing(service_name: str, environment: str) -> None:
     logger.info("tracing_configured", extra={"service": service_name})
 
 
-def instrument_app(app: FastAPI, engine: AsyncEngine | None = None) -> None:
-    """Auto-instrument FastAPI + SQLAlchemy. Safe to call once at startup."""
-    FastAPIInstrumentor.instrument_app(app)
-    if engine is not None:
-        SQLAlchemyInstrumentor().instrument(engine=engine.sync_engine)
+def add_otel_middleware(app: FastAPI) -> None:
+    """Register the ASGI OTEL middleware on a FastAPI app.
+
+    MUST be called at module-eval time (before `app.__call__` is first
+    invoked), NOT inside the lifespan: Starlette builds its middleware
+    stack lazily on first request and rejects `add_middleware` once the
+    stack exists — adding from lifespan works on a fresh process but
+    breaks on test re-runs where the module-level `app` is reused.
+
+    We skip FastAPIInstrumentor.instrument_app(app) because the 0.62b
+    series silently fails on our stack — `app._is_instrumented_by_opentelemetry`
+    stays missing, no HTTP server spans are exported (only the SQL spans
+    from SQLAlchemyInstrumentor reach Honeycomb). Direct registration of
+    OpenTelemetryMiddleware (the same ASGI middleware FastAPIInstrumentor
+    would have added internally) works reliably with the same outcome:
+    one span per HTTP request, with the route template as the span name.
+
+    The tracer provider doesn't need to be configured yet — the middleware
+    looks it up via the global at first-request time, after lifespan has
+    set the global via configure_tracing().
+    """
+    app.add_middleware(OpenTelemetryMiddleware)
+
+
+def instrument_sqlalchemy(engine: AsyncEngine) -> None:
+    """Wire OTEL SQLAlchemy instrumentation. Call from lifespan after the
+    engine is created (engine creation is itself deferred to lifespan via
+    the deps module's `_engine()` lru_cache).
+    """
+    SQLAlchemyInstrumentor().instrument(engine=engine.sync_engine)
