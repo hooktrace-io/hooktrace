@@ -8,10 +8,14 @@ from webhook_inspector.domain.entities.integration_aggregate import IntegrationA
 
 class RequestRepository(ABC):
     @abstractmethod
-    async def save(self, request: CapturedRequest) -> None: ...
+    async def save(self, request: CapturedRequest) -> None:
+        """INSERT a new captured request row + emit pg_notify('new_request', id)
+        in the same transaction so SSE consumers receive the id once committed.
+        """
 
     @abstractmethod
-    async def find_by_id(self, request_id: UUID) -> CapturedRequest | None: ...
+    async def find_by_id(self, request_id: UUID) -> CapturedRequest | None:
+        """Return the captured request with this id, or None if not found."""
 
     @abstractmethod
     async def list_by_endpoint(
@@ -20,7 +24,11 @@ class RequestRepository(ABC):
         limit: int = 50,
         before_id: UUID | None = None,
         q: str | None = None,
-    ) -> list[CapturedRequest]: ...
+    ) -> list[CapturedRequest]:
+        """Cursor pagination over captured requests for the endpoint.
+        Order: received_at DESC, id DESC for stable cursor.
+        `q` filters via tsvector full-text search (V2.5).
+        """
 
     @abstractmethod
     def stream_for_export(
@@ -29,14 +37,11 @@ class RequestRepository(ABC):
         max_count: int,
     ) -> AsyncIterator[CapturedRequest]:
         """Yield captured requests ordered by received_at DESC, capped at max_count."""
-        ...
 
     @abstractmethod
     async def count_by_endpoint(self, endpoint_id: UUID) -> int:
         """Return total number of captured requests for the endpoint."""
-        ...
 
     @abstractmethod
     async def aggregate_by_integration(self, endpoint_id: UUID) -> list[IntegrationAggregate]:
         """Return per-integration request aggregates for the endpoint."""
-        ...

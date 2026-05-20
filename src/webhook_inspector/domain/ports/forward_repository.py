@@ -8,16 +8,20 @@ from webhook_inspector.domain.entities.forward import Forward, ForwardStatus
 
 class ForwardRepository(ABC):
     @abstractmethod
-    async def save(self, forward: Forward) -> None: ...
+    async def save(self, forward: Forward) -> None:
+        """INSERT a new forward row in status='pending'."""
 
     @abstractmethod
-    async def find_by_id(self, forward_id: UUID) -> Forward | None: ...
+    async def find_by_id(self, forward_id: UUID) -> Forward | None:
+        """Return the forward with this id, or None if not found."""
 
     @abstractmethod
-    async def update(self, forward: Forward) -> None: ...
+    async def update(self, forward: Forward) -> None:
+        """UPDATE the row matching forward.id with the entity's mutable fields."""
 
     @abstractmethod
-    async def list_by_request(self, request_id: UUID) -> list[Forward]: ...
+    async def list_by_request(self, request_id: UUID) -> list[Forward]:
+        """Return all forwards triggered by the given request, oldest-first."""
 
     @abstractmethod
     async def claim_for_attempt(self, forward_id: UUID, *, now: datetime) -> Forward | None:
