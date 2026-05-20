@@ -34,12 +34,34 @@ jobs:
           APP_URL="https://app.hooktrace.io"
           INGESTOR_URL="https://hook.hooktrace.io"
 
-          test "$(curl -s -o /dev/null -w '%{http_code}' ${APP_URL}/health)" = "200" \
-            || { echo "app /health failed"; exit 1; }
-          test "$(curl -s -o /dev/null -w '%{http_code}' ${INGESTOR_URL}/health)" = "200" \
-            || { echo "ingestor /health failed"; exit 1; }
+          # Rolling restart can take 30-60s. Retry /health for up to 2.5 min
+          # before considering the deploy failed.
+          wait_for_200() {
+            local url=$1
+            local label=$2
+            local max=30
+            local attempts=0
+            until [ "$(curl -s -o /dev/null -w '%{http_code}' "$url")" = "200" ]; do
+              attempts=$((attempts + 1))
+              if [ "$attempts" -ge "$max" ]; then
+                echo "$label still not healthy after $max attempts (${url})"
+                exit 1
+              fi
+              echo "$label not healthy yet (attempt $attempts/$max), waiting 5s..."
+              sleep 5
+            done
+            echo "$label healthy"
+          }
+
+          wait_for_200 "${APP_URL}/health" "app /health"
+          wait_for_200 "${INGESTOR_URL}/health" "ingestor /health"
 
           TOKEN=$(curl -sX POST ${APP_URL}/api/endpoints | python3 -c "import sys,json;print(json.load(sys.stdin)['token'])")
+          if [ -z "$TOKEN" ]; then
+            echo "endpoint creation failed (empty token)"
+            exit 1
+          fi
+
           STATUS=$(curl -sX POST ${INGESTOR_URL}/h/${TOKEN} -d 'ci-deploy-smoke' -o /dev/null -w '%{http_code}')
           test "$STATUS" = "200" || { echo "smoke test failed with status $STATUS"; exit 1; }
 
