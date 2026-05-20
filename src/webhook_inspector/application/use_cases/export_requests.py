@@ -25,7 +25,7 @@ class ExportRequests:
     blob_storage: BlobStorage
     max_requests: int
 
-    async def execute(self, token: str) -> AsyncIterator[bytes]:
+    async def execute(self, *, token: str) -> AsyncIterator[bytes]:
         endpoint = await self.endpoint_repo.find_by_token(token)
         if endpoint is None:
             raise EndpointNotFoundError(token)

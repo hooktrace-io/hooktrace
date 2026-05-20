@@ -9,12 +9,25 @@ no-module-level-side-effects rule established for the web/ingestor apps.
 
 import logging
 import os
-from typing import Any, ClassVar
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+from typing import TYPE_CHECKING, Any, ClassVar
 from uuid import UUID
 
 from arq.connections import RedisSettings
 from arq.cron import cron
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+if TYPE_CHECKING:
+    from webhook_inspector.infrastructure.repositories.endpoint_repository import (
+        PostgresEndpointRepository,
+    )
+    from webhook_inspector.infrastructure.repositories.forward_repository import (
+        PostgresForwardRepository,
+    )
+    from webhook_inspector.infrastructure.repositories.request_repository import (
+        PostgresRequestRepository,
+    )
 
 from webhook_inspector.config import Settings
 from webhook_inspector.infrastructure.database.session import make_engine
@@ -41,15 +54,48 @@ _REDIS_DSN = os.environ.get("REDIS_URL", "redis://localhost:6379")
 async def execute_forward(ctx: dict[str, Any], forward_id_str: str) -> None:
     """arq job wrapper for ExecuteForward use case.
 
-    Builds the use case per-job (fresh DB session per invocation) using
-    stateless deps stashed on ctx at startup. Catches all uncaught exceptions,
-    logs them, and returns — the use case owns the retry budget via
-    claim_for_attempt + record_outcome; we do not let arq's max_tries
-    silently swallow failures.
+    ExecuteForward now manages its own session lifecycle (claim TX, HTTP
+    with no DB, record TX). The wrapper passes a ``unit_of_work`` factory
+    that opens a fresh session per phase. Defensive try/except catches
+    uncaught exceptions so arq's max_tries doesn't silently swallow them
+    — the use case owns the retry budget via claim/record_outcome.
     """
     from webhook_inspector.application.use_cases.execute_forward import ExecuteForward
-    from webhook_inspector.infrastructure.http.safe_replay_target import SafeReplayTarget
+    from webhook_inspector.infrastructure.http.safe_replay_target import make_safe_replay_target
     from webhook_inspector.infrastructure.queue.arq_forward_queue import ArqForwardQueue
+
+    session_factory: async_sessionmaker[AsyncSession] = ctx["_session_factory"]
+    try:
+        use_case = ExecuteForward(
+            unit_of_work=lambda: _postgres_unit_of_work(session_factory),
+            forward_queue=ArqForwardQueue(ctx["redis"]),
+            target=make_safe_replay_target(),
+            blob_storage=ctx["_blob_storage"],
+            metrics=ctx["_metrics_collector"],
+            secrets_key=ctx["_secrets_key"],
+        )
+        await use_case.execute(forward_id=UUID(forward_id_str))
+    except Exception:
+        logger.exception(
+            "execute_forward_uncaught",
+            extra={"forward_id": forward_id_str},
+        )
+
+
+@asynccontextmanager
+async def _postgres_unit_of_work(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> AsyncIterator[
+    tuple[
+        "PostgresForwardRepository",
+        "PostgresEndpointRepository",
+        "PostgresRequestRepository",
+    ]
+]:
+    """Open a session, build the three repos bound to it, commit on
+    successful exit, rollback on exception. Matches the contract of
+    ``ForwardUnitOfWork`` declared in the application layer.
+    """
     from webhook_inspector.infrastructure.repositories.endpoint_repository import (
         PostgresEndpointRepository,
     )
@@ -60,31 +106,17 @@ async def execute_forward(ctx: dict[str, Any], forward_id_str: str) -> None:
         PostgresRequestRepository,
     )
 
-    session_factory: async_sessionmaker[AsyncSession] = ctx["_session_factory"]
     async with session_factory() as session:
         try:
-            use_case = ExecuteForward(
-                endpoint_repo=PostgresEndpointRepository(session),
-                request_repo=PostgresRequestRepository(session),
-                forward_repo=PostgresForwardRepository(session),
-                forward_queue=ArqForwardQueue(ctx["redis"]),
-                target=SafeReplayTarget(
-                    blocked_host_suffixes=("hooktrace.io",),
-                    timeout_seconds=10.0,
-                    max_response_bytes=256 * 1024,
-                ),
-                blob_storage=ctx["_blob_storage"],
-                metrics=ctx["_metrics_collector"],
-                secrets_key=ctx["_secrets_key"],
+            yield (
+                PostgresForwardRepository(session),
+                PostgresEndpointRepository(session),
+                PostgresRequestRepository(session),
             )
-            await use_case.execute(UUID(forward_id_str))
             await session.commit()
         except Exception:
             await session.rollback()
-            logger.exception(
-                "execute_forward_uncaught",
-                extra={"forward_id": forward_id_str},
-            )
+            raise
 
 
 async def startup(ctx: dict[str, object]) -> None:
@@ -101,6 +133,17 @@ async def startup(ctx: dict[str, object]) -> None:
     configure_tracing(settings.service_name + "-worker", settings.environment)
     configure_metrics(service_name=settings.service_name + "-worker")
     logger.info("worker_startup", extra={"service": settings.service_name + "-worker"})
+
+    # Prod fail-fast: without REDIS_URL the worker has nothing to drain
+    # (arq's RedisSettings would still bind, but it would point at the
+    # default localhost — silently disconnected from the production queue
+    # populated by ingestor/web). Worker doesn't read the rate-limit
+    # Redis, so RATE_LIMIT_REDIS_URL is intentionally not checked here.
+    if settings.environment == "prod" and not settings.redis_url:
+        raise RuntimeError(
+            "REDIS_URL is required in production but is not set. "
+            "Without it, the worker cannot drain the forward queue."
+        )
 
     engine = make_engine(settings)
     session_factory: async_sessionmaker[AsyncSession] = async_sessionmaker(

@@ -8,7 +8,6 @@ header stripping (auth + sig + hop-by-hop), include_headers/body=False.
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
-import httpx
 import pytest
 
 from tests.fakes import (
@@ -28,7 +27,10 @@ from webhook_inspector.application.use_cases.replay_request import (
 from webhook_inspector.domain.entities.captured_request import CapturedRequest
 from webhook_inspector.domain.entities.endpoint import Endpoint
 from webhook_inspector.domain.exceptions import EndpointNotFoundError
-from webhook_inspector.domain.ports.http_replay_target import SsrfBlockedError
+from webhook_inspector.domain.ports.http_replay_target import (
+    HttpRequestFailedError,
+    SsrfBlockedError,
+)
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -71,6 +73,37 @@ def _captured(
     )
 
 
+class _ReplayUowCounter:
+    """Wraps fake replay repos in a unit-of-work and counts entries.
+    Architectural invariant: 2 entries per replay attempt (auth/load +
+    record). SSRF / endpoint_not_found / request_not_found paths may
+    open only 1 (the auth phase short-circuits before record).
+    """
+
+    def __init__(
+        self,
+        endpoint_repo: FakeEndpointRepo,
+        request_repo: FakeRequestRepo,
+        replay_repo: FakeReplayRepository,
+    ) -> None:
+        self.endpoint_repo = endpoint_repo
+        self.request_repo = request_repo
+        self.replay_repo = replay_repo
+        self.count = 0
+
+    def __call__(self):  # type: ignore[no-untyped-def]
+        from contextlib import asynccontextmanager
+
+        outer = self
+
+        @asynccontextmanager
+        async def _ctx():  # type: ignore[no-untyped-def]
+            outer.count += 1
+            yield (outer.endpoint_repo, outer.request_repo, outer.replay_repo)
+
+        return _ctx()
+
+
 def _use_case(
     *,
     endpoint_repo: FakeEndpointRepo | None = None,
@@ -79,15 +112,17 @@ def _use_case(
     target: FakeHttpReplayTarget | None = None,
     blob_storage: FakeBlobStorage | None = None,
     metrics: FakeMetricsCollector | None = None,
+    uow_counter: _ReplayUowCounter | None = None,
 ) -> tuple[ReplayRequest, FakeMetricsCollector, FakeHttpReplayTarget, FakeReplayRepository]:
     m = metrics or FakeMetricsCollector()
     t = target or FakeHttpReplayTarget()
+    erepo = endpoint_repo or FakeEndpointRepo()
+    rreqrepo = request_repo or FakeRequestRepo()
     rr = replay_repo or FakeReplayRepository()
+    counter = uow_counter or _ReplayUowCounter(erepo, rreqrepo, rr)
     return (
         ReplayRequest(
-            endpoint_repo=endpoint_repo or FakeEndpointRepo(),
-            request_repo=request_repo or FakeRequestRepo(),
-            replay_repo=rr,
+            unit_of_work=counter,
             target=t,
             blob_storage=blob_storage or FakeBlobStorage(),
             metrics=m,
@@ -167,7 +202,7 @@ async def test_records_target_error_as_failure():
     req_repo = FakeRequestRepo(items=[req])
 
     target = FakeHttpReplayTarget()
-    target.raise_on_send(httpx.ConnectError("Connection refused"))
+    target.raise_on_send(HttpRequestFailedError("ConnectError: Connection refused", kind="network"))
 
     uc, metrics, _, replay_repo = _use_case(
         endpoint_repo=ep_repo, request_repo=req_repo, target=target
@@ -353,3 +388,55 @@ async def test_include_body_false_sends_empty_body():
     assert target.last_call.body == b""
     # blob.puts has no gets — no get call was made (blob still has data)
     assert blob.puts == {blob_key: b"should not be fetched"}
+
+
+# ---------------------------------------------------------------------------
+# Architectural invariant: TWO unit-of-work entries per attempt
+# (one for auth/load, one for record_outcome). The HTTP step runs OUTSIDE
+# any UoW, so the DB connection is free during replay's slow part.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_two_sessions_opened_per_replay_on_happy_path() -> None:
+    ep = _endpoint()
+    req = _captured(ep.id)
+    ep_repo = FakeEndpointRepo(seed=ep)
+    req_repo = FakeRequestRepo(items=[req])
+    replay_repo = FakeReplayRepository()
+    target = FakeHttpReplayTarget()
+    target.respond(status=200, body=b"ok", headers={})
+
+    counter = _ReplayUowCounter(ep_repo, req_repo, replay_repo)
+    uc, _, _, _ = _use_case(
+        endpoint_repo=ep_repo,
+        request_repo=req_repo,
+        replay_repo=replay_repo,
+        target=target,
+        uow_counter=counter,
+    )
+    await uc.execute(token=ep.token, request_id=req.id, target_url=_TARGET_URL)
+    assert counter.count == 2  # auth + record, deterministic
+
+
+@pytest.mark.asyncio
+async def test_two_sessions_opened_per_replay_on_network_failure() -> None:
+    """Network error still needs the record TX (failure row persisted)."""
+    ep = _endpoint()
+    req = _captured(ep.id)
+    ep_repo = FakeEndpointRepo(seed=ep)
+    req_repo = FakeRequestRepo(items=[req])
+    replay_repo = FakeReplayRepository()
+    target = FakeHttpReplayTarget()
+    target.raise_on_send(HttpRequestFailedError("ConnectError", kind="network"))
+
+    counter = _ReplayUowCounter(ep_repo, req_repo, replay_repo)
+    uc, _, _, _ = _use_case(
+        endpoint_repo=ep_repo,
+        request_repo=req_repo,
+        replay_repo=replay_repo,
+        target=target,
+        uow_counter=counter,
+    )
+    await uc.execute(token=ep.token, request_id=req.id, target_url=_TARGET_URL)
+    assert counter.count == 2

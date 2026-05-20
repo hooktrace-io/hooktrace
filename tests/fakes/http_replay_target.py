@@ -37,7 +37,7 @@ class FakeHttpReplayTarget(HttpReplayTarget):
     def raise_on_send(self, exc: Exception) -> None:
         self._send_error = exc
 
-    def validate(self, url: str) -> ValidatedTarget:
+    async def validate(self, url: str) -> ValidatedTarget:
         if self._validate_error is not None:
             raise self._validate_error
         return ValidatedTarget(url=url, host="example.com", port=443, ip="1.2.3.4")

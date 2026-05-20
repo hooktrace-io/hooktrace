@@ -32,4 +32,10 @@ class HmacValidator(ABC):
         body: bytes,
         headers: dict[str, str],
         secret: str,
-    ) -> ValidationResult: ...
+    ) -> ValidationResult:
+        """Return the validation outcome for this provider's signature scheme.
+
+        Implementations MUST be constant-time when comparing the computed
+        digest to the header value (hmac.compare_digest). Header lookup MUST
+        be case-insensitive.
+        """

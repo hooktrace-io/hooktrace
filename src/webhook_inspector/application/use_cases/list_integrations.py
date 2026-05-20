@@ -18,7 +18,7 @@ class ListIntegrations:
     endpoint_repo: EndpointRepository
     request_repo: RequestRepository
 
-    async def execute_for_token(self, token: str) -> list[IntegrationAggregate]:
+    async def execute(self, *, token: str) -> list[IntegrationAggregate]:
         endpoint = await self.endpoint_repo.find_by_token(token)
         if endpoint is None:
             raise EndpointNotFoundError(token)

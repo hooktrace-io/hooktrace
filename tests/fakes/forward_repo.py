@@ -191,3 +191,54 @@ class FakeForwardRepository(ForwardRepository):
         ]
         stuck.sort(key=lambda f: f.created_at)
         return [f.id for f in stuck]
+
+    async def reclaim_stuck_in_flight(
+        self,
+        endpoint_id: UUID,
+        *,
+        stuck_threshold_seconds: int,
+        now: datetime,
+    ) -> list[UUID]:
+        threshold = now - timedelta(seconds=stuck_threshold_seconds)
+        latest: dict[UUID, Forward] = {}
+        for f in self.saved:
+            latest[f.id] = f
+        for f in self.updated:
+            latest[f.id] = f
+
+        reclaimed_ids: list[UUID] = []
+        for f in latest.values():
+            if (
+                f.endpoint_id == endpoint_id
+                and f.status == "in_flight"
+                and f.forward_started_at is not None
+                and f.forward_started_at < threshold
+            ):
+                self.updated.append(
+                    replace(f, status="failed", next_attempt_at=now),
+                )
+                reclaimed_ids.append(f.id)
+        return reclaimed_ids
+
+    async def list_overdue_failed(
+        self,
+        endpoint_id: UUID,
+        *,
+        now: datetime,
+    ) -> list[UUID]:
+        latest: dict[UUID, Forward] = {}
+        for f in self.saved:
+            latest[f.id] = f
+        for f in self.updated:
+            latest[f.id] = f
+
+        overdue = [
+            f
+            for f in latest.values()
+            if f.endpoint_id == endpoint_id
+            and f.status == "failed"
+            and f.next_attempt_at is not None
+            and f.next_attempt_at <= now
+        ]
+        overdue.sort(key=lambda f: f.next_attempt_at or now)
+        return [f.id for f in overdue]

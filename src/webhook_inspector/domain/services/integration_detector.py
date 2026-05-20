@@ -14,13 +14,32 @@ LIMITATIONS (intentional, V3-acceptable):
 """
 
 from collections.abc import Callable
+from typing import Literal
 
 _HeadersDict = dict[str, str]
 _FormParams = dict[str, str]
 
+# Single source of truth for the 9 supported integrations.
+#
 # Tied to migration 0005's CHECK constraint
-# (migrations/versions/0005_4113bf01bbf7_integration_detection.py).
-# Adding a 10th integration = update BOTH this tuple AND the migration's enum.
+# (migrations/versions/0005_4113bf01bbf7_integration_detection.py) AND to the
+# hmac.factory._VALIDATORS dict. Adding a 10th integration = update the
+# Literal below, the migration's enum, AND the validator registry.
+type IntegrationName = Literal[
+    "stripe",
+    "github",
+    "shopify",
+    "twilio",
+    "mailgun",
+    "discord",
+    "slack",
+    "zapier",
+    "n8n",
+]
+
+# Runtime mirror of the Literal above for membership checks. Kept in lockstep
+# manually because Python has no built-in way to derive a frozenset from a
+# `type` statement at module-eval time.
 INTEGRATION_NAMES: frozenset[str] = frozenset(
     {
         "stripe",

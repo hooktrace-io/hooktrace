@@ -14,6 +14,12 @@ doesn't auto-freeze — the launch plan stipulates manual review. Flag =
 from dataclasses import dataclass
 from uuid import UUID
 
+# Threshold of POSTs an endpoint must have received in 24h before the
+# phishing heuristic considers it suspect. Tunable single source of truth —
+# both the SQL HAVING clause in jobs/abuse_scan.py and the in-memory check
+# below MUST reference this constant so they never drift.
+MIN_SUSPICIOUS_POSTS = 20
+
 
 @dataclass(frozen=True)
 class PhishingSignal:
@@ -23,4 +29,4 @@ class PhishingSignal:
 
     @property
     def is_suspicious(self) -> bool:
-        return self.post_count_24h >= 20 and self.forward_succeeded_count_24h == 0
+        return self.post_count_24h >= MIN_SUSPICIOUS_POSTS and self.forward_succeeded_count_24h == 0

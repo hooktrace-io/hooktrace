@@ -1,6 +1,19 @@
 app            = "webhook-inspector-worker"
 primary_region = "cdg"
 
+# Required Fly secrets (NOT in this file — set via `fly secrets set`):
+#   - DATABASE_URL                  Postgres async DSN (postgres+psycopg://...)
+#   - SECRETS_ENCRYPTION_KEY        32 bytes base64; AES-256 for HMAC + forward secrets
+#   - REDIS_URL                     Upstash rediss:// URL — arq forward queue (drained here)
+#   - S3_ENDPOINT_URL               Cloudflare R2 account-scoped endpoint
+#   - S3_BUCKET_NAME                R2 bucket name
+#   - S3_ACCESS_KEY_ID              R2 access key
+#   - S3_SECRET_ACCESS_KEY          R2 secret access key
+#   - ABUSE_WEBHOOK_URL             (optional) Discord webhook for phishing-scan alerts
+# WorkerSettings.on_startup asserts REDIS_URL is set when ENVIRONMENT="prod"
+# and raises so the worker doesn't silently drain an empty localhost queue.
+# RATE_LIMIT_REDIS_URL is NOT required: the worker doesn't read it.
+
 [build]
   # Same Dockerfile as web/ingestor. uv installs arq into /app/.venv/bin/ and
   # the runtime stage sets PATH so `arq` resolves.

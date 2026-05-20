@@ -7,7 +7,7 @@ from typing import Annotated, Literal, cast
 from uuid import UUID
 
 import markdown
-from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field, HttpUrl
 from sqlalchemy import text
@@ -51,8 +51,12 @@ from webhook_inspector.domain.entities.endpoint import (
 )
 from webhook_inspector.domain.entities.forward import Forward
 from webhook_inspector.domain.exceptions import EndpointValidationError, SlugAlreadyTakenError
+from webhook_inspector.domain.ports.forward_queue import ForwardQueue
+from webhook_inspector.domain.ports.metrics_collector import MetricsCollector
 from webhook_inspector.domain.services.hmac.base import ValidationResult
+from webhook_inspector.domain.services.integration_detector import IntegrationName
 from webhook_inspector.infrastructure.notifications.postgres_notifier import PostgresNotifier
+from webhook_inspector.web.app import deps as app_deps_module
 from webhook_inspector.web.app.deps import (
     _session_factory,
     get_abandon_forward,
@@ -74,6 +78,36 @@ from webhook_inspector.web.app.deps import (
 from webhook_inspector.web.app.schemas.endpoint_config import EndpointConfigPatch
 from webhook_inspector.web.app.sse import stream_for_token
 from webhook_inspector.web.middleware.token_rate_limit import enforce_token_limit
+
+
+def _get_forward_queue_dep() -> ForwardQueue:
+    """Indirection so tests can monkeypatch
+    ``webhook_inspector.web.app.deps.get_forward_queue`` and have the swap
+    take effect on this route too. A ``from deps import get_forward_queue``
+    would capture the original reference at import time, defeating the
+    monkeypatch.
+    """
+    return app_deps_module.get_forward_queue()
+
+
+# --- Module-level constants ---------------------------------------------------
+# Per-token cap on outbound replays. IP-keyed middleware already protects the
+# API surface against scraping; this caps the blast radius of a single hijacked
+# token used to spam targets.
+REPLAY_LIMIT_PER_HOUR = 10
+
+# Window used by all hourly per-token caps (replay, capture, ...).
+RATE_LIMIT_WINDOW_SECONDS_1H = 3600
+
+# Max length of the `q` search query on /requests endpoints. Bounded so the
+# server doesn't run unbounded LIKE/regex over user-controlled strings.
+SEARCH_QUERY_MAX_CHARS = 200
+
+# Pagination bounds for list_forwards (and other listing endpoints that share
+# the same shape).
+LIST_LIMIT_MIN = 1
+LIST_LIMIT_MAX = 200
+
 
 router = APIRouter()
 
@@ -165,9 +199,18 @@ async def create_endpoint(
             response_delay_ms=response_spec.delay_ms,
         )
     except SlugAlreadyTakenError as e:
-        raise HTTPException(status_code=409, detail=str(e)) from e
+        # Hardcoded detail — do NOT leak str(e) which embeds the raw token,
+        # giving probers a confirmation oracle for slug guesses.
+        raise HTTPException(status_code=409, detail="slug already taken") from e
     except EndpointValidationError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
+        # Hardcoded detail — the exception hierarchy contains a half-dozen
+        # subclasses (InvalidSlug, ReservedSlug, SlugDenylisted, ...). A single
+        # generic message keeps the response stable across releases and avoids
+        # exposing the active denylist / reserved set.
+        raise HTTPException(
+            status_code=400,
+            detail="invalid slug or response configuration",
+        ) from e
 
     return CreateEndpointResponse(
         url=f"{hook_base_url(request)}/h/{endpoint.token}",
@@ -202,17 +245,7 @@ async def update_config(
 
 
 class IntegrationAggregateResponse(BaseModel):
-    integration: Literal[
-        "stripe",
-        "github",
-        "shopify",
-        "twilio",
-        "mailgun",
-        "discord",
-        "slack",
-        "zapier",
-        "n8n",
-    ]
+    integration: IntegrationName
     total: int
     event_types: dict[str, int]
     signature_status_counts: dict[str, int]
@@ -227,7 +260,7 @@ async def list_integrations_route(
     use_case: ListIntegrations = Depends(get_list_integrations),  # noqa: B008
 ) -> list[IntegrationAggregateResponse]:
     try:
-        aggregates = await use_case.execute_for_token(token)
+        aggregates = await use_case.execute(token=token)
     except EndpointNotFoundError as e:
         raise HTTPException(status_code=404, detail="endpoint not found") from e
     return [
@@ -258,20 +291,7 @@ class RequestItem(BaseModel):
         ]
         | None
     ) = None
-    detected_integration: (
-        Literal[
-            "stripe",
-            "github",
-            "shopify",
-            "twilio",
-            "mailgun",
-            "discord",
-            "slack",
-            "zapier",
-            "n8n",
-        ]
-        | None
-    ) = None
+    detected_integration: IntegrationName | None = None
     detected_event_type: str | None = None
 
 
@@ -333,8 +353,11 @@ async def _fetch_requests_or_raise(
     use_case: ListRequests,
 ) -> list[CapturedRequest]:
     """Validate q length and fetch captured requests; raise HTTP errors on failure."""
-    if q is not None and len(q) > 200:
-        raise HTTPException(status_code=400, detail="q must be <= 200 characters")
+    if q is not None and len(q) > SEARCH_QUERY_MAX_CHARS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"q must be <= {SEARCH_QUERY_MAX_CHARS} characters",
+        )
     try:
         return await use_case.execute(token=token, limit=limit, before_id=before_id, q=q)
     except EndpointNotFoundError as e:
@@ -344,7 +367,7 @@ async def _fetch_requests_or_raise(
 @router.get("/api/endpoints/{token}/requests", response_model=RequestList)
 async def list_requests(
     token: str,
-    limit: int = 50,
+    limit: int = Query(default=50, ge=LIST_LIMIT_MIN, le=LIST_LIMIT_MAX),
     before_id: UUID | None = None,
     q: str | None = None,
     use_case: ListRequests = Depends(get_list_requests),  # noqa: B008
@@ -377,7 +400,7 @@ async def list_requests(
 async def list_requests_fragment(
     token: str,
     request: Request,
-    limit: int = 50,
+    limit: int = Query(default=50, ge=LIST_LIMIT_MIN, le=LIST_LIMIT_MAX),
     before_id: UUID | None = None,
     q: str | None = None,
     use_case: ListRequests = Depends(get_list_requests),  # noqa: B008
@@ -446,8 +469,8 @@ async def replay_request_route(
     await enforce_token_limit(
         token=token,
         rule_name="replay",
-        limit=10,
-        window_seconds=3600,
+        limit=REPLAY_LIMIT_PER_HOUR,
+        window_seconds=RATE_LIMIT_WINDOW_SECONDS_1H,
         metrics=get_metrics(),
     )
     try:
@@ -480,12 +503,10 @@ async def replay_request_route(
 async def list_forwards_route(
     token: str,
     status: Annotated[list[str] | None, Query()] = None,
-    limit: int = 50,
+    limit: int = Query(default=50, ge=LIST_LIMIT_MIN, le=LIST_LIMIT_MAX),
     before_id: UUID | None = None,
     use_case: ListForwards = Depends(get_list_forwards),  # noqa: B008
 ) -> ForwardList:
-    if not 1 <= limit <= 200:
-        raise HTTPException(status_code=400, detail="limit must be in [1, 200]")
     try:
         forwards = await use_case.execute(
             token=token, statuses=status, limit=limit, before_id=before_id
@@ -519,7 +540,9 @@ async def get_forward_stats_route(
 async def retry_forward_route(
     token: str,
     forward_id: UUID,
+    background_tasks: BackgroundTasks,
     use_case: RetryForward = Depends(get_retry_forward),  # noqa: B008
+    forward_queue: ForwardQueue = Depends(_get_forward_queue_dep),  # noqa: B008
 ) -> ForwardItem:
     try:
         forward = await use_case.execute(token=token, forward_id=forward_id)
@@ -530,7 +553,37 @@ async def retry_forward_route(
         # returned for "wrong status" and "cross-endpoint" so the API cannot be
         # used to probe whether a forward_id exists under a different token.
         raise HTTPException(status_code=404, detail="forward not retryable") from e
+
+    # Post-commit enqueue (see CaptureRequest result docstring for the
+    # race rationale). The use case has flipped status to 'pending' but
+    # the get_session dependency only commits when execute() returns;
+    # BackgroundTasks runs after the response (and therefore after the
+    # commit), so the worker sees a fully-committed row.
+    background_tasks.add_task(_safe_enqueue, forward_queue, get_metrics(), forward.id)
     return _to_forward_item(forward)
+
+
+async def _safe_enqueue(
+    forward_queue: ForwardQueue,
+    metrics: MetricsCollector,
+    forward_id: UUID,
+) -> None:
+    """Best-effort enqueue used by background tasks (retry route + any
+    other post-commit enqueue paths). Redis flap must not surface as a
+    500: the row is already in 'pending', so manual redrive recovers it.
+    On failure, log AND increment forward_enqueue_failed so the failure
+    rate is visible (operator-facing metric, not silently lost).
+    """
+    import logging
+
+    try:
+        await forward_queue.enqueue(forward_id, defer_seconds=0)
+    except Exception:
+        metrics.forward_enqueue_failed()
+        logging.getLogger(__name__).exception(
+            "forward_enqueue_failed_post_commit",
+            extra={"forward_id": str(forward_id)},
+        )
 
 
 @router.post("/api/endpoints/{token}/forwards/redrive")
@@ -755,7 +808,7 @@ async def integrations_view(
     use_case: ListIntegrations = Depends(get_list_integrations),  # noqa: B008
 ) -> HTMLResponse:
     try:
-        aggregates = await use_case.execute_for_token(token)
+        aggregates = await use_case.execute(token=token)
     except EndpointNotFoundError as e:
         raise HTTPException(status_code=404, detail="endpoint not found") from e
 

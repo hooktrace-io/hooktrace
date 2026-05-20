@@ -49,7 +49,7 @@ async def test_aggregates_by_integration_event_and_signature_status(endpoint_rep
     )
 
     use_case = ListIntegrations(endpoint_repo=endpoint_repo, request_repo=request_repo)
-    result = await use_case.execute_for_token("abc")
+    result = await use_case.execute(token="abc")
 
     by_int = {a.integration: a for a in result}
     assert by_int["stripe"].total == 3
@@ -64,7 +64,7 @@ async def test_list_integrations_raises_for_unknown_token(endpoint_repo, request
     """Unknown token raises EndpointNotFoundError."""
     use_case = ListIntegrations(endpoint_repo=endpoint_repo, request_repo=request_repo)
     with pytest.raises(EndpointNotFoundError):
-        await use_case.execute_for_token("nonexistent")
+        await use_case.execute(token="nonexistent")
 
 
 async def test_aggregate_by_integration_empty_returns_empty_list(endpoint_repo, request_repo):
@@ -73,7 +73,7 @@ async def test_aggregate_by_integration_empty_returns_empty_list(endpoint_repo, 
     endpoint_repo.add(token="empty-ep", id=ep_id)
 
     use_case = ListIntegrations(endpoint_repo=endpoint_repo, request_repo=request_repo)
-    result = await use_case.execute_for_token("empty-ep")
+    result = await use_case.execute(token="empty-ep")
 
     assert result == []
 
@@ -88,7 +88,7 @@ async def test_integration_without_event_type_has_empty_event_types(endpoint_rep
     )
 
     use_case = ListIntegrations(endpoint_repo=endpoint_repo, request_repo=request_repo)
-    result = await use_case.execute_for_token("twilio-ep")
+    result = await use_case.execute(token="twilio-ep")
 
     assert len(result) == 1
     twilio = result[0]
@@ -117,7 +117,7 @@ async def test_sorted_by_total_descending(endpoint_repo, request_repo):
     )
 
     use_case = ListIntegrations(endpoint_repo=endpoint_repo, request_repo=request_repo)
-    result = await use_case.execute_for_token("sorted-ep")
+    result = await use_case.execute(token="sorted-ep")
 
     assert result[0].integration == "stripe"
     assert result[1].integration == "github"

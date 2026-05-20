@@ -7,6 +7,7 @@ controlled DNS rebinding). See PR4 §"DNS rebinding — accepted V3 gap"
 for the V4 fix options.
 """
 
+import asyncio
 import ipaddress
 import socket
 from urllib.parse import urlsplit
@@ -15,6 +16,7 @@ import httpx
 
 from webhook_inspector.domain.ports.http_replay_target import (
     HttpReplayTarget,
+    HttpRequestFailedError,
     SsrfBlockedError,
     ValidatedTarget,
 )
@@ -22,10 +24,35 @@ from webhook_inspector.domain.ports.http_replay_target import (
 _ALLOWED_SCHEMES = frozenset({"http", "https"})
 _ALLOWED_PORTS = frozenset({80, 443})
 
+# --- Default config shared between web replay route + worker forward job ----
+# Both paths run untrusted user URLs through the same SSRF guard with the
+# same timeout and the same response cap. Keeping the values in one place
+# stops them from drifting.
+_DEFAULT_BLOCKED_HOST_SUFFIXES: tuple[str, ...] = ("hooktrace.io",)
+_DEFAULT_TIMEOUT_SECONDS: float = 10.0
+_DEFAULT_MAX_RESPONSE_BYTES: int = 256 * 1024
 
-def _resolve(host: str) -> list[str]:
-    """Thin wrapper around getaddrinfo so tests can monkeypatch."""
-    infos = socket.getaddrinfo(host, None, type=socket.SOCK_STREAM)
+# Bound on the DNS lookup so a stalled resolver can't pin the event loop. The
+# downstream HTTP timeout (10s default) bounds the connect+read; DNS is the
+# step before either, so the cap is intentionally tight.
+_DNS_TIMEOUT_SECONDS: float = 5.0
+
+
+async def _resolve(host: str) -> list[str]:
+    """Async wrapper around getaddrinfo so tests can monkeypatch.
+
+    socket.getaddrinfo is blocking; running it directly on the event loop
+    pins every concurrent request to whatever the resolver is doing. We
+    hop to a thread and time-bound the call — a stalled DNS server raises
+    SsrfBlockedError("dns timeout") rather than wedging the loop.
+    """
+    try:
+        infos = await asyncio.wait_for(
+            asyncio.to_thread(socket.getaddrinfo, host, None, type=socket.SOCK_STREAM),
+            timeout=_DNS_TIMEOUT_SECONDS,
+        )
+    except TimeoutError as e:
+        raise SsrfBlockedError(f"DNS resolution timed out for {host}") from e
     return [str(info[4][0]) for info in infos]
 
 
@@ -52,7 +79,7 @@ class SafeReplayTarget(HttpReplayTarget):
         self._timeout = timeout_seconds
         self._max_response_bytes = max_response_bytes
 
-    def validate(self, url: str) -> ValidatedTarget:
+    async def validate(self, url: str) -> ValidatedTarget:
         parts = urlsplit(url)
         if parts.scheme.lower() not in _ALLOWED_SCHEMES:
             raise SsrfBlockedError(f"scheme not allowed: {parts.scheme}")
@@ -76,7 +103,7 @@ class SafeReplayTarget(HttpReplayTarget):
             ipaddress.ip_address(host)
             ips = [host]
         except ValueError:
-            ips = _resolve(host)
+            ips = await _resolve(host)
 
         if not ips:
             raise SsrfBlockedError(f"DNS returned no addresses for {host}")
@@ -106,21 +133,63 @@ class SafeReplayTarget(HttpReplayTarget):
         private one, bypassing the entire SSRF guard. Do not flip without
         re-validating each redirect hop.
         """
-        async with httpx.AsyncClient(
-            timeout=httpx.Timeout(self._timeout),
-            follow_redirects=False,
-            limits=httpx.Limits(max_connections=10),
-        ) as client:
-            resp = await client.request(
-                method=method,
-                url=validated.url,
-                headers=headers,
-                content=body,
-            )
-            body_out = bytearray()
-            async for chunk in resp.aiter_bytes(chunk_size=8192):
-                body_out.extend(chunk)
-                if len(body_out) >= self._max_response_bytes:
-                    body_out = body_out[: self._max_response_bytes]
-                    break
-            return resp.status_code, dict(resp.headers), bytes(body_out)
+        try:
+            async with httpx.AsyncClient(
+                timeout=httpx.Timeout(self._timeout),
+                follow_redirects=False,
+                limits=httpx.Limits(max_connections=10),
+            ) as client:
+                resp = await client.request(
+                    method=method,
+                    url=validated.url,
+                    headers=headers,
+                    content=body,
+                )
+                body_out = bytearray()
+                async for chunk in resp.aiter_bytes(chunk_size=8192):
+                    body_out.extend(chunk)
+                    if len(body_out) >= self._max_response_bytes:
+                        body_out = body_out[: self._max_response_bytes]
+                        break
+                return resp.status_code, dict(resp.headers), bytes(body_out)
+        except httpx.TimeoutException as exc:
+            # Translate httpx's exception hierarchy into a port-level error
+            # so callers in the application layer never import httpx.
+            raise HttpRequestFailedError(
+                f"{type(exc).__name__}: {exc}",
+                kind="timeout",
+            ) from exc
+        except httpx.HTTPError as exc:
+            raise HttpRequestFailedError(
+                f"{type(exc).__name__}: {exc}",
+                kind="network",
+            ) from exc
+        except OSError as exc:
+            raise HttpRequestFailedError(
+                f"{type(exc).__name__}: {exc}",
+                kind="network",
+            ) from exc
+        except Exception as exc:
+            # Belt-and-braces: any unexpected exception from httpx (or a future
+            # transport plugin we don't know about) gets wrapped as kind="other"
+            # so the application layer never sees a non-port exception. This
+            # honors the contract in HttpRequestFailedError's docstring.
+            raise HttpRequestFailedError(
+                f"{type(exc).__name__}: {exc}",
+                kind="other",
+            ) from exc
+
+
+def make_safe_replay_target() -> SafeReplayTarget:
+    """Default-configured SafeReplayTarget for outbound replay + forward.
+
+    Centralized so the timeout, response cap, and blocked-host suffixes stay
+    in sync between the web replay route (get_replay_request) and the worker
+    forward job (execute_forward). Callers that need different values can
+    still instantiate `SafeReplayTarget(...)` directly.
+    """
+    return SafeReplayTarget(
+        blocked_host_suffixes=_DEFAULT_BLOCKED_HOST_SUFFIXES,
+        timeout_seconds=_DEFAULT_TIMEOUT_SECONDS,
+        max_response_bytes=_DEFAULT_MAX_RESPONSE_BYTES,
+    )

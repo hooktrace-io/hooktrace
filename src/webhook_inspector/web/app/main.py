@@ -24,6 +24,11 @@ TEMPLATES_DIR = Path(__file__).parent / "templates"
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 apply_globals(templates.env)
 
+# IP-keyed rate limit on the owner-facing API surface (/api/endpoints/).
+# Tuned for interactive use of the viewer + CLI; fail-open so a Redis outage
+# never locks owners out of their own data.
+API_RATE_LIMIT_PER_MINUTE = 300
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -34,6 +39,26 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     # Validate secrets key at startup so a misconfigured deploy fails fast.
     _validate_secrets_key(settings.secrets_encryption_key)
+
+    # Prod fail-fast: without REDIS_URL the forward enqueue silently
+    # falls back to NullForwardQueue and forward jobs are dropped on the
+    # floor. Without RATE_LIMIT_REDIS_URL the rate-limit middleware
+    # bypasses every check (fail-open on /api/endpoints/). Both must be
+    # set in prod; in dev/test/local we keep the silent fallback so the
+    # stack runs without Redis.
+    if settings.environment == "prod":
+        if not settings.redis_url:
+            raise RuntimeError(
+                "REDIS_URL is required in production but is not set. "
+                "Without it, forward jobs cannot be enqueued; the feature "
+                "is silently disabled."
+            )
+        if not settings.rate_limit_redis_url:
+            raise RuntimeError(
+                "RATE_LIMIT_REDIS_URL is required in production but is not "
+                "set. Without it, the rate limit middleware bypasses all "
+                "checks."
+            )
 
     # Build notifier once and store on app.state so request-scoped deps can read it.
     sync_dsn = settings.database_url.replace("+psycopg_async", "").replace("+psycopg", "")
@@ -116,7 +141,12 @@ app.add_middleware(
     redis_url_provider=lambda: os.environ.get("RATE_LIMIT_REDIS_URL"),
     rules={
         # Owner-facing API → fail-open if Redis dies (don't lock owners out).
-        "/api/endpoints/": _Rule(name="api", limit=300, window_seconds=60, fail_mode="open"),
+        "/api/endpoints/": _Rule(
+            name="api",
+            limit=API_RATE_LIMIT_PER_MINUTE,
+            window_seconds=60,
+            fail_mode="open",
+        ),
     },
     metrics_provider=get_metrics,
 )

@@ -8,16 +8,20 @@ from webhook_inspector.domain.entities.forward import Forward, ForwardStatus
 
 class ForwardRepository(ABC):
     @abstractmethod
-    async def save(self, forward: Forward) -> None: ...
+    async def save(self, forward: Forward) -> None:
+        """INSERT a new forward row in status='pending'."""
 
     @abstractmethod
-    async def find_by_id(self, forward_id: UUID) -> Forward | None: ...
+    async def find_by_id(self, forward_id: UUID) -> Forward | None:
+        """Return the forward with this id, or None if not found."""
 
     @abstractmethod
-    async def update(self, forward: Forward) -> None: ...
+    async def update(self, forward: Forward) -> None:
+        """UPDATE the row matching forward.id with the entity's mutable fields."""
 
     @abstractmethod
-    async def list_by_request(self, request_id: UUID) -> list[Forward]: ...
+    async def list_by_request(self, request_id: UUID) -> list[Forward]:
+        """Return all forwards triggered by the given request, oldest-first."""
 
     @abstractmethod
     async def claim_for_attempt(self, forward_id: UUID, *, now: datetime) -> Forward | None:
@@ -113,4 +117,54 @@ class ForwardRepository(ABC):
         Returns their IDs (UNCHANGED status — the route handler then calls
         forward_queue.enqueue() for each). 5-minute threshold avoids racing
         with captures that JUST enqueued.
+        """
+
+    @abstractmethod
+    async def reclaim_stuck_in_flight(
+        self,
+        endpoint_id: UUID,
+        *,
+        stuck_threshold_seconds: int,
+        now: datetime,
+    ) -> list[UUID]:
+        """Recover forwards stuck in status='in_flight' past the threshold.
+
+        A worker crash between TX1 (claim → in_flight) and TX2 (record_outcome)
+        leaves the row stuck: arq's retry sees in_flight, claim_for_attempt
+        only matches pending/failed, the row is unreachable.
+
+        Atomic UPDATE: status='in_flight' AND forward_started_at < now - threshold
+        → status='failed', next_attempt_at=now. The natural retry path then
+        picks them up via claim_for_attempt's pending/failed branch.
+
+        Returns the IDs of reclaimed rows. After this call, list_overdue_failed
+        will also return them (next_attempt_at=now <= now), so if a subsequent
+        enqueue fails the next redrive cycle still catches the row.
+
+        Threshold should comfortably exceed the worst-case HTTP timeout
+        (10s) to avoid clobbering in-progress attempts on slow networks.
+        """
+
+    @abstractmethod
+    async def list_overdue_failed(
+        self,
+        endpoint_id: UUID,
+        *,
+        now: datetime,
+    ) -> list[UUID]:
+        """Find `status='failed'` rows whose retry was scheduled but no
+        worker job ever fired (enqueue lost during Redis flap, BackgroundTask
+        crash, or arq queue drop).
+
+        Selects: endpoint_id matches AND status='failed' AND
+        next_attempt_at IS NOT NULL AND next_attempt_at <= now.
+
+        Returns the IDs (unchanged state — the caller re-enqueues). The
+        `next_attempt_at <= now` predicate naturally excludes freshly-failed
+        forwards whose backoff window is still in the future.
+
+        Pairs with reclaim_stuck_in_flight: reclaimed rows have
+        next_attempt_at=now, so they're already eligible for this sweep
+        on the next redrive — guaranteeing recovery even if the immediate
+        post-reclaim enqueue fails.
         """

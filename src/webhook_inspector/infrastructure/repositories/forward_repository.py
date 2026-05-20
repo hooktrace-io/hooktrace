@@ -249,6 +249,46 @@ class PostgresForwardRepository(ForwardRepository):
         rows = (await self._session.execute(stmt)).scalars().all()
         return list(rows)
 
+    async def reclaim_stuck_in_flight(
+        self,
+        endpoint_id: UUID,
+        *,
+        stuck_threshold_seconds: int,
+        now: datetime,
+    ) -> list[UUID]:
+        threshold = now - timedelta(seconds=stuck_threshold_seconds)
+        stmt = (
+            update(ForwardTable)
+            .where(
+                ForwardTable.endpoint_id == endpoint_id,  # type: ignore[arg-type]
+                ForwardTable.status == "in_flight",  # type: ignore[arg-type]
+                ForwardTable.forward_started_at < threshold,  # type: ignore[arg-type,operator]
+            )
+            .values(status="failed", next_attempt_at=now)
+            .returning(ForwardTable.id)  # type: ignore[call-overload]
+        )
+        result = await self._session.execute(stmt)
+        return [row[0] for row in result.all()]
+
+    async def list_overdue_failed(
+        self,
+        endpoint_id: UUID,
+        *,
+        now: datetime,
+    ) -> list[UUID]:
+        stmt = (
+            select(ForwardTable.id)  # type: ignore[call-overload]
+            .where(
+                ForwardTable.endpoint_id == endpoint_id,
+                ForwardTable.status == "failed",
+                ForwardTable.next_attempt_at.isnot(None),  # type: ignore[union-attr]
+                ForwardTable.next_attempt_at <= now,  # type: ignore[operator]
+            )
+            .order_by(ForwardTable.next_attempt_at.asc())  # type: ignore[union-attr]
+        )
+        rows = (await self._session.execute(stmt)).scalars().all()
+        return list(rows)
+
 
 def _to_entity(row: ForwardTable) -> Forward:
     return Forward(

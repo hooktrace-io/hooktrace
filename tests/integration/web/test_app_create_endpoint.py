@@ -83,17 +83,16 @@ async def test_post_endpoints_with_custom_response_payload(monkeypatch, database
 
 
 @pytest.mark.parametrize(
-    ("bad_response", "expected_detail_substring"),
+    "bad_response",
     [
-        ({"status_code": 700}, "status_code"),
-        ({"delay_ms": 60000}, "delay_ms"),
-        ({"body": "x" * 70000}, "body"),
-        ({"headers": {"Content-Length": "0"}}, "Content-Length"),
+        {"status_code": 700},
+        {"delay_ms": 60000},
+        {"body": "x" * 70000},
+        {"headers": {"Content-Length": "0"}},
     ],
+    ids=["status_code", "delay_ms", "body", "Content-Length"],
 )
-async def test_post_endpoints_validation_errors(
-    monkeypatch, database_url, engine, bad_response, expected_detail_substring
-):
+async def test_post_endpoints_validation_errors(monkeypatch, database_url, engine, bad_response):
     monkeypatch.setenv("DATABASE_URL", database_url.replace("+psycopg_async", "+psycopg"))
     from webhook_inspector.web.app import deps
 
@@ -104,5 +103,7 @@ async def test_post_endpoints_validation_errors(
     transport = ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         resp = await client.post("/api/endpoints", json={"response": bad_response})
+        # The route returns a hardcoded generic detail so consumers cannot probe
+        # internal exception types; the per-field validation is covered by the
+        # unit tests of CreateEndpoint use case.
         assert resp.status_code == 400
-        assert expected_detail_substring.lower() in resp.text.lower()

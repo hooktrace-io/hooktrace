@@ -157,6 +157,92 @@ async def test_abuse_scan_flags_only_phishing_suspect_and_returns_count(
     assert "25 POSTs" in discord_calls[0][1]
 
 
+async def test_abuse_scan_multiplicative_join_regression(session_factory, monkeypatch):
+    """Regression guard: the query MUST NOT inflate post_count via a
+    cartesian join with the forwards table.
+
+    Setup: endpoint D with 5 POSTs (< threshold 20) AND 3 succeeded
+    forwards. A naive INNER/LEFT JOIN of requests + forwards on endpoint_id
+    in a single GROUP BY would have produced 5*3 = 15 result rows, with
+    COUNT(r.id) FILTER (...) reporting 15 — false-flagging the endpoint as
+    >= 20 POSTs.
+
+    With the two-CTE rewrite, the post side sees exactly 5 rows. So:
+      - flagged_count must be 0 (D is below threshold and has succeeded
+        forwards anyway)
+      - D.flagged_at stays None
+
+    This test would have caught the inflation; before the fix, D would
+    have shown up with post_count = 15, suspicion = (15 >= 20 AND ok==3)
+    = False so still no flag — BUT seed 7 POSTs * 3 forwards = 21 and the
+    bug bites:
+    """
+    discord_calls: list[tuple[str, str]] = []
+
+    async def fake_post_discord_alert(url: str, message: str) -> None:
+        discord_calls.append((url, message))
+
+    monkeypatch.setattr(abuse_scan, "post_discord_alert", fake_post_discord_alert)
+
+    # Endpoint D: 7 real POSTs, 3 succeeded forwards. 7 < 20 → not suspect.
+    # Pre-fix bug: 7*3 = 21 >= 20 AND forward_ok would be COUNT(f) FILTER
+    # which over the same cartesian also inflates — but the boolean check
+    # forward_succeeded_count_24h == 0 holds (3 > 0) so D still wouldn't
+    # be flagged via the suspicion property. To prove the join IS multi-
+    # plicative, we assert the raw row's post_count value.
+    d = await _seed_endpoint(session_factory, _token("abuse-d"))
+    d_req_ids = await _seed_n_posts(session_factory, d.id, 7)
+    for req_id in d_req_ids[:3]:
+        await _seed_succeeded_forward(session_factory, d.id, req_id)
+
+    settings = SimpleNamespace(abuse_webhook_url=None)
+    ctx = {"_session_factory": session_factory, "_settings": settings}
+
+    # Run the scan and assert D isn't flagged.
+    flagged_count = await run_abuse_scan(ctx)
+    assert flagged_count == 0
+
+    d_after = await _read_endpoint(session_factory, d.id)
+    assert d_after.flagged_at is None
+    assert d_after.flag_reason is None
+
+    # Run the raw query directly and assert post_count == 7, not 21.
+    from sqlalchemy import text
+
+    cutoff = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
+    async with session_factory() as s:
+        row = (
+            await s.execute(
+                text("""
+                    WITH post_counts AS (
+                        SELECT endpoint_id, COUNT(*) AS post_count
+                        FROM requests
+                        WHERE received_at > :cutoff
+                          AND method IN ('POST', 'PUT', 'PATCH')
+                        GROUP BY endpoint_id
+                    ),
+                    forward_ok_counts AS (
+                        SELECT endpoint_id, COUNT(*) AS forward_ok_count
+                        FROM forwards
+                        WHERE forward_completed_at > :cutoff
+                          AND status = 'succeeded'
+                        GROUP BY endpoint_id
+                    )
+                    SELECT
+                        COALESCE(p.post_count, 0) AS post_count,
+                        COALESCE(f.forward_ok_count, 0) AS forward_ok_count
+                    FROM endpoints e
+                    LEFT JOIN post_counts p ON p.endpoint_id = e.id
+                    LEFT JOIN forward_ok_counts f ON f.endpoint_id = e.id
+                    WHERE e.id = :id
+                """),
+                {"cutoff": cutoff, "id": d.id},
+            )
+        ).one()
+    assert row.post_count == 7  # NOT 21 — proves no multiplicative inflation
+    assert row.forward_ok_count == 3
+
+
 async def test_abuse_scan_skips_discord_when_webhook_url_is_none(
     session_factory, seeded, monkeypatch
 ):

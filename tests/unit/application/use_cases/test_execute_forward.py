@@ -15,10 +15,10 @@ Covers all 13 spec branches:
   12. Header fusion — Authorization stripped from capture; endpoint adds its own
 """
 
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
-import httpx
 import pytest
 
 from tests.fakes import (
@@ -34,7 +34,10 @@ from webhook_inspector.application.use_cases.execute_forward import ExecuteForwa
 from webhook_inspector.domain.entities.captured_request import CapturedRequest
 from webhook_inspector.domain.entities.endpoint import Endpoint
 from webhook_inspector.domain.entities.forward import Forward
-from webhook_inspector.domain.ports.http_replay_target import SsrfBlockedError
+from webhook_inspector.domain.ports.http_replay_target import (
+    HttpRequestFailedError,
+    SsrfBlockedError,
+)
 from webhook_inspector.infrastructure.crypto.secrets import encrypt_secret
 
 # ---------------------------------------------------------------------------
@@ -108,6 +111,35 @@ def _forward(
     )
 
 
+@dataclass
+class _UowCounter:
+    """Wraps a fake unit-of-work and counts entries. The architectural
+    invariant is "two sessions per attempt": one for claim (TX1), one
+    for record (TX2). Tests assert .count == 2 on the happy path and on
+    every recoverable failure path; .count == 1 on duplicate-fire (skip)
+    and TTL-cleaned branches, since those never reach the record phase.
+    """
+
+    forward_repo: FakeForwardRepository
+    endpoint_repo: FakeEndpointRepo
+    request_repo: FakeRequestRepo
+    count: int = 0
+
+    def __call__(self):  # type: ignore[no-untyped-def]
+        # Return a fresh async context manager per call so each phase
+        # "opens" its own logical session — i.e. the counter advances.
+        from contextlib import asynccontextmanager
+
+        outer = self
+
+        @asynccontextmanager
+        async def _ctx():  # type: ignore[no-untyped-def]
+            outer.count += 1
+            yield (outer.forward_repo, outer.endpoint_repo, outer.request_repo)
+
+        return _ctx()
+
+
 def _use_case(
     *,
     endpoint_repo: FakeEndpointRepo | None = None,
@@ -118,11 +150,23 @@ def _use_case(
     blob_storage: FakeBlobStorage | None = None,
     metrics: FakeMetricsCollector | None = None,
     secrets_key: bytes = _SECRETS_KEY,
+    uow_counter: _UowCounter | None = None,
 ) -> ExecuteForward:
+    """Build an ExecuteForward whose ``unit_of_work`` is a fake that
+    just returns the in-memory fake repos. If ``uow_counter`` is passed,
+    its .count attribute will be incremented each time the context is
+    entered — tests can use it to assert the "two sessions per attempt"
+    invariant.
+    """
+    erepo = endpoint_repo or FakeEndpointRepo()
+    rrepo = request_repo or FakeRequestRepo()
+    frepo = forward_repo or FakeForwardRepository()
+    counter = uow_counter or _UowCounter(
+        forward_repo=frepo, endpoint_repo=erepo, request_repo=rrepo
+    )
+
     return ExecuteForward(
-        endpoint_repo=endpoint_repo or FakeEndpointRepo(),
-        request_repo=request_repo or FakeRequestRepo(),
-        forward_repo=forward_repo or FakeForwardRepository(),
+        unit_of_work=counter,
         forward_queue=forward_queue or FakeForwardQueue(),
         target=target or FakeHttpReplayTarget(),
         blob_storage=blob_storage or FakeBlobStorage(),
@@ -160,7 +204,7 @@ async def test_happy_path_200() -> None:
         target=target,
         metrics=metrics,
     )
-    await uc.execute(fwd.id)
+    await uc.execute(forward_id=fwd.id)
 
     outcome = await fwd_repo.find_by_id(fwd.id)
     assert outcome is not None
@@ -194,7 +238,7 @@ async def test_retryable_503_first_attempt() -> None:
         target=target,
         metrics=metrics,
     )
-    await uc.execute(fwd.id)
+    await uc.execute(forward_id=fwd.id)
 
     outcome = await fwd_repo.find_by_id(fwd.id)
     assert outcome is not None
@@ -218,7 +262,7 @@ async def test_network_error_first_attempt() -> None:
     await fwd_repo.save(fwd)
     queue = FakeForwardQueue()
     target = FakeHttpReplayTarget()
-    target.raise_on_send(httpx.ConnectError("connection refused"))
+    target.raise_on_send(HttpRequestFailedError("ConnectError: connection refused", kind="network"))
     metrics = FakeMetricsCollector()
 
     uc = _use_case(
@@ -229,7 +273,7 @@ async def test_network_error_first_attempt() -> None:
         target=target,
         metrics=metrics,
     )
-    await uc.execute(fwd.id)
+    await uc.execute(forward_id=fwd.id)
 
     outcome = await fwd_repo.find_by_id(fwd.id)
     assert outcome is not None
@@ -265,7 +309,7 @@ async def test_5th_attempt_503_exhausts_budget() -> None:
         target=target,
         metrics=metrics,
     )
-    await uc.execute(fwd.id)
+    await uc.execute(forward_id=fwd.id)
 
     outcome = await fwd_repo.find_by_id(fwd.id)
     assert outcome is not None
@@ -298,7 +342,7 @@ async def test_4xx_hard_fail_is_immediately_dead() -> None:
         target=target,
         metrics=metrics,
     )
-    await uc.execute(fwd.id)
+    await uc.execute(forward_id=fwd.id)
 
     outcome = await fwd_repo.find_by_id(fwd.id)
     assert outcome is not None
@@ -332,7 +376,7 @@ async def test_ssrf_block_records_dead_with_error_message() -> None:
         target=target,
         metrics=metrics,
     )
-    await uc.execute(fwd.id)
+    await uc.execute(forward_id=fwd.id)
 
     outcome = await fwd_repo.find_by_id(fwd.id)
     assert outcome is not None
@@ -368,7 +412,7 @@ async def test_claim_fails_duplicate_fire_is_skipped() -> None:
         target=target,
         metrics=metrics,
     )
-    await uc.execute(fwd.id)
+    await uc.execute(forward_id=fwd.id)
 
     # No outcome recorded (claim returned None → returned early)
     assert metrics.forward_attempt_calls == ["skipped"]
@@ -401,7 +445,7 @@ async def test_endpoint_deleted_ttl_records_dead() -> None:
         target=target,
         metrics=metrics,
     )
-    await uc.execute(fwd.id)
+    await uc.execute(forward_id=fwd.id)
 
     outcome = await fwd_repo.find_by_id(fwd.id)
     assert outcome is not None
@@ -435,7 +479,7 @@ async def test_request_deleted_ttl_records_dead() -> None:
         target=target,
         metrics=metrics,
     )
-    await uc.execute(fwd.id)
+    await uc.execute(forward_id=fwd.id)
 
     outcome = await fwd_repo.find_by_id(fwd.id)
     assert outcome is not None
@@ -466,7 +510,7 @@ async def test_hmac_signature_applied_when_endpoint_has_forward_secret() -> None
         target=target,
         secrets_key=_SECRETS_KEY,
     )
-    await uc.execute(fwd.id)
+    await uc.execute(forward_id=fwd.id)
 
     assert target.last_call is not None
     assert "X-Hooktrace-Signature" in target.last_call.headers
@@ -500,7 +544,7 @@ async def test_body_fetched_from_r2_when_blob_key_set() -> None:
         target=target,
         blob_storage=blob,
     )
-    await uc.execute(fwd.id)
+    await uc.execute(forward_id=fwd.id)
 
     assert target.last_call is not None
     assert target.last_call.body == r2_body
@@ -532,7 +576,7 @@ async def test_header_fusion_authorization_stripped_endpoint_wins() -> None:
         forward_repo=fwd_repo,
         target=target,
     )
-    await uc.execute(fwd.id)
+    await uc.execute(forward_id=fwd.id)
 
     assert target.last_call is not None
     headers_sent = target.last_call.headers
@@ -543,3 +587,96 @@ async def test_header_fusion_authorization_stripped_endpoint_wins() -> None:
     # Idempotency-Key and X-Hooktrace-Forward-Id always present
     assert "Idempotency-Key" in headers_sent
     assert "X-Hooktrace-Forward-Id" in headers_sent
+
+
+# ---------------------------------------------------------------------------
+# Architectural invariant: TWO unit-of-work entries per attempt
+# (one for the claim TX, one for the record TX). Releases the DB
+# connection during the HTTP step.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_two_sessions_opened_per_attempt_on_happy_path() -> None:
+    """One UoW entry for claim (TX1), one for record (TX2). The HTTP
+    step runs OUTSIDE any UoW, so the pool is free during the slow part.
+    """
+    ep = _endpoint()
+    req = _captured(ep.id)
+    fwd = _forward(ep.id, req.id)
+
+    ep_repo = FakeEndpointRepo(seed=ep)
+    req_repo = FakeRequestRepo(items=[req])
+    fwd_repo = FakeForwardRepository()
+    await fwd_repo.save(fwd)
+    target = FakeHttpReplayTarget()
+    target.respond(status=200, body=b"ok", headers={})
+
+    counter = _UowCounter(forward_repo=fwd_repo, endpoint_repo=ep_repo, request_repo=req_repo)
+    uc = _use_case(
+        endpoint_repo=ep_repo,
+        request_repo=req_repo,
+        forward_repo=fwd_repo,
+        target=target,
+        uow_counter=counter,
+    )
+
+    await uc.execute(forward_id=fwd.id)
+    assert counter.count == 2  # claim + record, deterministic
+
+
+@pytest.mark.asyncio
+async def test_two_sessions_opened_per_attempt_on_network_failure() -> None:
+    """Network error still needs the record TX (to persist 'failed'),
+    so the count must be 2.
+    """
+    ep = _endpoint()
+    req = _captured(ep.id)
+    fwd = _forward(ep.id, req.id)
+
+    ep_repo = FakeEndpointRepo(seed=ep)
+    req_repo = FakeRequestRepo(items=[req])
+    fwd_repo = FakeForwardRepository()
+    await fwd_repo.save(fwd)
+    target = FakeHttpReplayTarget()
+    target.raise_on_send(HttpRequestFailedError("ConnectError: connection refused", kind="network"))
+
+    counter = _UowCounter(forward_repo=fwd_repo, endpoint_repo=ep_repo, request_repo=req_repo)
+    uc = _use_case(
+        endpoint_repo=ep_repo,
+        request_repo=req_repo,
+        forward_repo=fwd_repo,
+        target=target,
+        uow_counter=counter,
+    )
+
+    await uc.execute(forward_id=fwd.id)
+    assert counter.count == 2
+
+
+@pytest.mark.asyncio
+async def test_only_one_session_opened_when_claim_fails() -> None:
+    """Duplicate fire (claim returns None) short-circuits before HTTP;
+    we never need the second session.
+    """
+    ep = _endpoint()
+    req = _captured(ep.id)
+    fwd = _forward(ep.id, req.id, attempt_count=1, status="in_flight")  # not claimable
+
+    ep_repo = FakeEndpointRepo(seed=ep)
+    req_repo = FakeRequestRepo(items=[req])
+    fwd_repo = FakeForwardRepository()
+    await fwd_repo.save(fwd)
+    target = FakeHttpReplayTarget()
+
+    counter = _UowCounter(forward_repo=fwd_repo, endpoint_repo=ep_repo, request_repo=req_repo)
+    uc = _use_case(
+        endpoint_repo=ep_repo,
+        request_repo=req_repo,
+        forward_repo=fwd_repo,
+        target=target,
+        uow_counter=counter,
+    )
+
+    await uc.execute(forward_id=fwd.id)
+    assert counter.count == 1  # claim only — no record TX needed

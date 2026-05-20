@@ -4,6 +4,7 @@ import pytest
 import respx
 
 from webhook_inspector.domain.ports.http_replay_target import (
+    HttpRequestFailedError,
     SsrfBlockedError,
     ValidatedTarget,
 )
@@ -58,9 +59,10 @@ def target() -> SafeReplayTarget:
         "http://example.com:6379/",
     ],
 )
-def test_blocks_static_evil_urls(target: SafeReplayTarget, url: str) -> None:
+@pytest.mark.asyncio
+async def test_blocks_static_evil_urls(target: SafeReplayTarget, url: str) -> None:
     with pytest.raises(SsrfBlockedError):
-        target.validate(url)
+        await target.validate(url)
 
 
 # ---------------------------------------------------------------------------
@@ -68,22 +70,24 @@ def test_blocks_static_evil_urls(target: SafeReplayTarget, url: str) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_blocks_self_pointing(target: SafeReplayTarget) -> None:
+@pytest.mark.asyncio
+async def test_blocks_self_pointing(target: SafeReplayTarget) -> None:
     with pytest.raises(SsrfBlockedError):
-        target.validate("https://app.hooktrace.io/foo")
+        await target.validate("https://app.hooktrace.io/foo")
     with pytest.raises(SsrfBlockedError):
-        target.validate("https://hook.hooktrace.io/h/abc")
+        await target.validate("https://hook.hooktrace.io/h/abc")
 
 
-def test_blocks_self_pointing_with_trailing_dot(target: SafeReplayTarget) -> None:
+@pytest.mark.asyncio
+async def test_blocks_self_pointing_with_trailing_dot(target: SafeReplayTarget) -> None:
     """`example.com.` is the same FQDN as `example.com` per DNS rules. A
     naive suffix check on the raw hostname would let `app.hooktrace.io.`
     through ; the trailing-dot normalization closes that hole.
     """
     with pytest.raises(SsrfBlockedError):
-        target.validate("https://app.hooktrace.io./foo")
+        await target.validate("https://app.hooktrace.io./foo")
     with pytest.raises(SsrfBlockedError):
-        target.validate("https://HOOKTRACE.IO./bar")
+        await target.validate("https://HOOKTRACE.IO./bar")
 
 
 # ---------------------------------------------------------------------------
@@ -91,39 +95,53 @@ def test_blocks_self_pointing_with_trailing_dot(target: SafeReplayTarget) -> Non
 # ---------------------------------------------------------------------------
 
 
-def test_blocks_name_that_resolves_to_private(
+def _fake_resolver(ips: list[str]):
+    """Build an async resolver returning the given IP list, matching the new
+    signature of `_resolve` (async since it now hops via asyncio.to_thread).
+    """
+
+    async def resolver(host: str) -> list[str]:
+        return ips
+
+    return resolver
+
+
+@pytest.mark.asyncio
+async def test_blocks_name_that_resolves_to_private(
     target: SafeReplayTarget, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(
         "webhook_inspector.infrastructure.http.safe_replay_target._resolve",
-        lambda host: ["10.0.0.5"],
+        _fake_resolver(["10.0.0.5"]),
     )
     with pytest.raises(SsrfBlockedError):
-        target.validate("https://localhost.example.com/")
+        await target.validate("https://localhost.example.com/")
 
 
-def test_blocks_if_any_resolved_ip_is_private(
+@pytest.mark.asyncio
+async def test_blocks_if_any_resolved_ip_is_private(
     target: SafeReplayTarget, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Multi-A record where one address is public, one is private.
     Must reject — the second address could be selected by httpx at connect."""
     monkeypatch.setattr(
         "webhook_inspector.infrastructure.http.safe_replay_target._resolve",
-        lambda host: ["1.1.1.1", "10.0.0.5"],
+        _fake_resolver(["1.1.1.1", "10.0.0.5"]),
     )
     with pytest.raises(SsrfBlockedError):
-        target.validate("https://multi.example.com/")
+        await target.validate("https://multi.example.com/")
 
 
-def test_blocks_gcp_metadata_name(
+@pytest.mark.asyncio
+async def test_blocks_gcp_metadata_name(
     target: SafeReplayTarget, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(
         "webhook_inspector.infrastructure.http.safe_replay_target._resolve",
-        lambda host: ["169.254.169.254"],
+        _fake_resolver(["169.254.169.254"]),
     )
     with pytest.raises(SsrfBlockedError):
-        target.validate("https://metadata.google.internal/")
+        await target.validate("https://metadata.google.internal/")
 
 
 # ---------------------------------------------------------------------------
@@ -131,12 +149,15 @@ def test_blocks_gcp_metadata_name(
 # ---------------------------------------------------------------------------
 
 
-def test_validates_public_url(target: SafeReplayTarget, monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.asyncio
+async def test_validates_public_url(
+    target: SafeReplayTarget, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.setattr(
         "webhook_inspector.infrastructure.http.safe_replay_target._resolve",
-        lambda host: ["93.184.216.34"],
+        _fake_resolver(["93.184.216.34"]),
     )
-    result = target.validate("https://example.com/webhook")
+    result = await target.validate("https://example.com/webhook")
     assert result.host == "example.com"
     assert result.port == 443
     assert result.ip == "93.184.216.34"
@@ -147,15 +168,50 @@ def test_validates_public_url(target: SafeReplayTarget, monkeypatch: pytest.Monk
 # ---------------------------------------------------------------------------
 
 
-def test_blocks_when_dns_returns_no_addresses(
+@pytest.mark.asyncio
+async def test_blocks_when_dns_returns_no_addresses(
     target: SafeReplayTarget, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(
         "webhook_inspector.infrastructure.http.safe_replay_target._resolve",
-        lambda host: [],
+        _fake_resolver([]),
     )
     with pytest.raises(SsrfBlockedError, match="no addresses"):
-        target.validate("https://void.example.com/")
+        await target.validate("https://void.example.com/")
+
+
+# ---------------------------------------------------------------------------
+# DNS timeout — guards against stalled resolvers pinning the event loop
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_blocks_when_dns_resolution_times_out(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The DNS hop is wrapped in asyncio.wait_for(_DNS_TIMEOUT_SECONDS). A
+    resolver that never returns must NOT wedge the use case forever — it
+    surfaces as SsrfBlockedError so the calling code records a deterministic
+    dead status (matches every other validate-time block).
+    """
+    import socket
+    import time
+
+    from webhook_inspector.infrastructure.http import safe_replay_target as srt
+
+    # Shrink the timeout so the test doesn't actually wait the prod 5s.
+    monkeypatch.setattr(srt, "_DNS_TIMEOUT_SECONDS", 0.05)
+
+    def slow_getaddrinfo(*args, **kwargs):  # type: ignore[no-untyped-def]
+        # Blocking sleep — runs inside asyncio.to_thread so the loop stays
+        # free. The wait_for() in _resolve will cancel us before we return.
+        time.sleep(5)
+        return []
+
+    monkeypatch.setattr(socket, "getaddrinfo", slow_getaddrinfo)
+
+    with pytest.raises(SsrfBlockedError, match="timed out"):
+        await srt._resolve("slow.example.com")
 
 
 # ---------------------------------------------------------------------------
@@ -235,3 +291,45 @@ async def test_send_does_not_follow_redirects() -> None:
             body=b"",
         )
     assert status == 301  # NOT 200 — redirect not followed
+
+
+@pytest.mark.asyncio
+async def test_send_translates_httpx_connect_error_to_port_exception() -> None:
+    """httpx.ConnectError must surface as HttpRequestFailedError(kind="network")
+    so the application layer never has to import httpx."""
+    import httpx
+
+    tgt = SafeReplayTarget()
+    validated = ValidatedTarget(
+        url="https://example.com/webhook",
+        host="example.com",
+        port=443,
+        ip="93.184.216.34",
+    )
+    with respx.mock(base_url="https://example.com") as respx_mock:
+        respx_mock.post("/webhook").mock(side_effect=httpx.ConnectError("Connection refused"))
+        with pytest.raises(HttpRequestFailedError) as exc_info:
+            await tgt.send(method="POST", validated=validated, headers={}, body=b"")
+
+    assert exc_info.value.kind == "network"
+    assert "ConnectError" in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_send_translates_httpx_timeout_to_port_exception_with_kind_timeout() -> None:
+    """httpx.TimeoutException must surface as HttpRequestFailedError(kind="timeout")."""
+    import httpx
+
+    tgt = SafeReplayTarget()
+    validated = ValidatedTarget(
+        url="https://example.com/webhook",
+        host="example.com",
+        port=443,
+        ip="93.184.216.34",
+    )
+    with respx.mock(base_url="https://example.com") as respx_mock:
+        respx_mock.post("/webhook").mock(side_effect=httpx.ReadTimeout("slow target"))
+        with pytest.raises(HttpRequestFailedError) as exc_info:
+            await tgt.send(method="POST", validated=validated, headers={}, body=b"")
+
+    assert exc_info.value.kind == "timeout"

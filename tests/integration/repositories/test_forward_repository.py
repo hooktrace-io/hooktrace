@@ -66,6 +66,7 @@ async def _seed_forward(
     final_status_code: int | None = None,
     final_error: str | None = None,
     forward_completed_at: datetime | None = None,
+    forward_started_at: datetime | None = None,
 ) -> Forward:
     repo = PostgresForwardRepository(session)
     now = datetime.now(UTC)
@@ -83,6 +84,7 @@ async def _seed_forward(
         final_status_code=final_status_code,
         final_error=final_error,
         forward_completed_at=forward_completed_at,
+        forward_started_at=forward_started_at,
     )
     await repo.save(forward)
     await session.commit()
@@ -511,6 +513,194 @@ async def test_redrive_stuck_pending_returns_empty_when_none(session):
     ids = await repo.redrive_stuck_pending(
         endpoint.id, stuck_threshold_seconds=300, now=datetime.now(UTC)
     )
+    assert ids == []
+
+
+# ---- reclaim_stuck_in_flight -----------------------------------------------
+
+
+async def test_reclaim_stuck_in_flight_marks_old_in_flight_as_failed(session):
+    endpoint = await _seed_endpoint(session)
+    req = await _seed_request(session, endpoint.id)
+    repo = PostgresForwardRepository(session)
+
+    now = datetime.now(UTC)
+    threshold = 300
+
+    stuck = await _seed_forward(
+        session,
+        endpoint_id=endpoint.id,
+        request_id=req.id,
+        status="in_flight",
+        attempt_count=1,
+        forward_started_at=now - timedelta(seconds=threshold + 60),
+    )
+    # Fresh in_flight — within the threshold, must NOT be reclaimed.
+    await _seed_forward(
+        session,
+        endpoint_id=endpoint.id,
+        request_id=req.id,
+        status="in_flight",
+        attempt_count=1,
+        forward_started_at=now - timedelta(seconds=30),
+    )
+
+    ids = await repo.reclaim_stuck_in_flight(
+        endpoint.id, stuck_threshold_seconds=threshold, now=now
+    )
+    await session.commit()
+
+    assert ids == [stuck.id]
+    reloaded = await repo.find_by_id(stuck.id)
+    assert reloaded is not None
+    assert reloaded.status == "failed"
+    assert reloaded.next_attempt_at == now
+
+
+async def test_reclaim_stuck_in_flight_isolates_across_endpoints(session):
+    endpoint_a = await _seed_endpoint(session)
+    endpoint_b = await _seed_endpoint(session)
+    req_a = await _seed_request(session, endpoint_a.id)
+    req_b = await _seed_request(session, endpoint_b.id)
+    repo = PostgresForwardRepository(session)
+
+    now = datetime.now(UTC)
+    a_stuck = await _seed_forward(
+        session,
+        endpoint_id=endpoint_a.id,
+        request_id=req_a.id,
+        status="in_flight",
+        forward_started_at=now - timedelta(seconds=600),
+    )
+    await _seed_forward(
+        session,
+        endpoint_id=endpoint_b.id,
+        request_id=req_b.id,
+        status="in_flight",
+        forward_started_at=now - timedelta(seconds=600),
+    )
+
+    a_ids = await repo.reclaim_stuck_in_flight(endpoint_a.id, stuck_threshold_seconds=300, now=now)
+    assert a_ids == [a_stuck.id]
+
+
+async def test_reclaim_then_list_overdue_failed_picks_up_reclaimed(session):
+    """The contract that closes the 'enqueue fails after reclaim' gap:
+    reclaim sets next_attempt_at=now, so list_overdue_failed (next_attempt_at <= now)
+    re-finds the row on the very next redrive call.
+    """
+    endpoint = await _seed_endpoint(session)
+    req = await _seed_request(session, endpoint.id)
+    repo = PostgresForwardRepository(session)
+
+    now = datetime.now(UTC)
+    stuck = await _seed_forward(
+        session,
+        endpoint_id=endpoint.id,
+        request_id=req.id,
+        status="in_flight",
+        attempt_count=1,
+        forward_started_at=now - timedelta(seconds=600),
+    )
+
+    reclaimed = await repo.reclaim_stuck_in_flight(
+        endpoint.id, stuck_threshold_seconds=300, now=now
+    )
+    await session.commit()
+    assert reclaimed == [stuck.id]
+
+    overdue = await repo.list_overdue_failed(endpoint.id, now=now)
+    assert overdue == [stuck.id]
+
+
+async def test_list_overdue_failed_excludes_future_retry(session):
+    """A freshly-failed forward with next_attempt_at in the future (normal
+    backoff window) must NOT be in the overdue sweep."""
+    endpoint = await _seed_endpoint(session)
+    req = await _seed_request(session, endpoint.id)
+    repo = PostgresForwardRepository(session)
+
+    now = datetime.now(UTC)
+    # Update path to set next_attempt_at in the future
+    forward = await _seed_forward(
+        session,
+        endpoint_id=endpoint.id,
+        request_id=req.id,
+        status="failed",
+        attempt_count=1,
+    )
+    await repo.record_outcome(
+        forward.id,
+        next_status="failed",
+        final_status_code=503,
+        final_error="upstream 503",
+        next_attempt_at=now + timedelta(seconds=120),
+        now=now,
+    )
+    await session.commit()
+
+    overdue = await repo.list_overdue_failed(endpoint.id, now=now)
+    assert overdue == []
+
+
+async def test_list_overdue_failed_excludes_null_next_attempt(session):
+    """A failed row with next_attempt_at=NULL is dead-letter territory,
+    not retry territory — never picked up by the overdue sweep."""
+    endpoint = await _seed_endpoint(session)
+    req = await _seed_request(session, endpoint.id)
+    repo = PostgresForwardRepository(session)
+
+    now = datetime.now(UTC)
+    await _seed_forward(
+        session,
+        endpoint_id=endpoint.id,
+        request_id=req.id,
+        status="failed",
+    )
+    # _seed_forward leaves next_attempt_at at the Forward.create default (= now).
+    # Manually NULL it out via record_outcome with next_attempt_at=None to
+    # simulate a terminal failure that doesn't want retry.
+    # Easier: just verify the predicate excludes NULL by seeding a row that
+    # was never given a next_attempt_at via update.
+
+    # The fake-Forward path: status='failed' with next_attempt_at IS NULL.
+    # Re-seed by directly UPDATE-ing the row.
+    # Actually Forward.create sets next_attempt_at=now, so we need to update
+    # it explicitly to NULL.
+    rows = await repo.list_by_endpoint(endpoint.id, statuses=["failed"])
+    forward = rows[0]
+    from sqlalchemy import update as _update
+
+    from webhook_inspector.infrastructure.database.models import ForwardTable
+
+    await session.execute(
+        _update(ForwardTable)
+        .where(ForwardTable.id == forward.id)  # type: ignore[arg-type]
+        .values(next_attempt_at=None)
+    )
+    await session.commit()
+
+    overdue = await repo.list_overdue_failed(endpoint.id, now=now)
+    assert overdue == []
+
+
+async def test_reclaim_stuck_in_flight_ignores_non_in_flight(session):
+    """pending / failed / succeeded / dead / abandoned must never be reclaimed."""
+    endpoint = await _seed_endpoint(session)
+    req = await _seed_request(session, endpoint.id)
+    repo = PostgresForwardRepository(session)
+
+    now = datetime.now(UTC)
+    for status in ("pending", "failed", "succeeded", "dead", "abandoned"):
+        await _seed_forward(
+            session,
+            endpoint_id=endpoint.id,
+            request_id=req.id,
+            status=status,  # type: ignore[arg-type]
+            forward_started_at=now - timedelta(seconds=600),
+        )
+
+    ids = await repo.reclaim_stuck_in_flight(endpoint.id, stuck_threshold_seconds=300, now=now)
     assert ids == []
 
 

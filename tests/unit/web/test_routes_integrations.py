@@ -23,7 +23,7 @@ class _StubListIntegrations:
         self._result = result or []
         self._raise_404 = raise_404
 
-    async def execute_for_token(self, token: str) -> list[IntegrationAggregate]:
+    async def execute(self, *, token: str) -> list[IntegrationAggregate]:
         if self._raise_404:
             raise EndpointNotFoundError(token)
         return self._result

@@ -14,6 +14,11 @@ from webhook_inspector.web.ingestor.deps import _engine, get_metrics
 from webhook_inspector.web.ingestor.routes import router
 from webhook_inspector.web.middleware.rate_limit import RateLimitMiddleware, _Rule
 
+# IP-keyed rate limit on the public capture surface (/h/{token}). Tuned an
+# order of magnitude lower than the app — capture is the abuse vector —
+# and fail-closed so a Redis outage never silently widens the firehose.
+INGEST_RATE_LIMIT_PER_MINUTE = 100
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -24,6 +29,26 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     instrument_app(app, _engine())
     # Validate secrets key at startup so a misconfigured deploy fails fast.
     _validate_secrets_key(settings.secrets_encryption_key)
+
+    # Prod fail-fast: see web/app/main.py for the rationale. The ingestor
+    # publishes forward jobs on capture, so REDIS_URL is mandatory in
+    # prod; without it forward enqueue silently no-ops. The rate-limit
+    # middleware (/h/) fails closed (503) when its Redis is unset, but we
+    # still fail-fast in prod so the operator notices misconfiguration at
+    # deploy rather than serving 503s in production.
+    if settings.environment == "prod":
+        if not settings.redis_url:
+            raise RuntimeError(
+                "REDIS_URL is required in production but is not set. "
+                "Without it, forward jobs cannot be enqueued; the feature "
+                "is silently disabled."
+            )
+        if not settings.rate_limit_redis_url:
+            raise RuntimeError(
+                "RATE_LIMIT_REDIS_URL is required in production but is not "
+                "set. Without it, the rate limit middleware bypasses all "
+                "checks."
+            )
 
     if settings.redis_url:
         from arq import create_pool
@@ -53,7 +78,12 @@ app.add_middleware(
     redis_url_provider=lambda: os.environ.get("RATE_LIMIT_REDIS_URL"),
     rules={
         # Capture surface = abuse vector → fail-closed (503) if Redis dies.
-        "/h/": _Rule(name="ingest", limit=100, window_seconds=60, fail_mode="closed"),
+        "/h/": _Rule(
+            name="ingest",
+            limit=INGEST_RATE_LIMIT_PER_MINUTE,
+            window_seconds=60,
+            fail_mode="closed",
+        ),
     },
     metrics_provider=get_metrics,
 )

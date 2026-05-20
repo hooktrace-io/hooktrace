@@ -2,7 +2,7 @@ import asyncio
 import logging
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -12,6 +12,9 @@ from webhook_inspector.application.use_cases.capture_request import (
     EndpointNotFoundError,
 )
 from webhook_inspector.config import Settings
+from webhook_inspector.domain.ports.forward_queue import ForwardQueue
+from webhook_inspector.domain.ports.metrics_collector import MetricsCollector
+from webhook_inspector.web.ingestor import deps as ingestor_deps_module
 from webhook_inspector.web.ingestor.deps import (
     _blob_storage,
     get_capture_request,
@@ -23,6 +26,48 @@ from webhook_inspector.web.middleware.client_ip import extract_client_ip
 from webhook_inspector.web.middleware.token_rate_limit import enforce_token_limit
 
 logger = logging.getLogger(__name__)
+
+
+# --- Module-level constants ---------------------------------------------------
+# Per-token cap on captures. The IP-keyed middleware blocks raw flooding;
+# this caps a single token's volume so a leaked URL can't run forever.
+CAPTURE_LIMIT_PER_HOUR = 1000
+
+# Window used by the hourly per-token cap above.
+RATE_LIMIT_WINDOW_SECONDS_1H = 3600
+
+
+# --- Streaming body cap -------------------------------------------------------
+# ASGI servers expose the request body as a stream of chunks. `await
+# request.body()` reads the whole stream into memory with no per-chunk
+# cap. A client sending `Transfer-Encoding: chunked` (no Content-Length)
+# bypasses the early header check in `capture()` and can buffer
+# arbitrarily-large bodies in the worker.
+#
+# Read incrementally; abort the moment the accumulated total crosses
+# `max_bytes`. Drops the bytes already read, returns 413. Bounds peak
+# memory at ~max_bytes per concurrent capture.
+
+
+async def _read_body_with_cap(request: Request, *, max_bytes: int) -> bytes:
+    chunks: list[bytes] = []
+    total = 0
+    async for chunk in request.stream():
+        total += len(chunk)
+        if total > max_bytes:
+            raise HTTPException(status_code=413, detail="payload too large")
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
+def _get_forward_queue_dep() -> ForwardQueue:
+    """Indirection so tests can monkeypatch
+    `webhook_inspector.web.ingestor.deps.get_forward_queue` and have the
+    swap take effect on this route. See the matching helper in
+    web/app/routes.py for the same rationale (FastAPI's Depends graph
+    captures the function reference at decoration time).
+    """
+    return ingestor_deps_module.get_forward_queue()
 
 
 router = APIRouter()
@@ -73,29 +118,34 @@ async def capture(
     token: str,
     rest: str,
     request: Request,
+    background_tasks: BackgroundTasks,
     use_case: CaptureRequest = Depends(get_capture_request),  # noqa: B008
     settings: Settings = Depends(get_settings),  # noqa: B008
+    forward_queue: ForwardQueue = Depends(_get_forward_queue_dep),  # noqa: B008
 ) -> Response:
     # Per-token cap (1000/h): the IP-keyed middleware blocks raw flooding;
     # this caps a single token's volume so a leaked URL can't run forever.
     await enforce_token_limit(
         token=token,
         rule_name="capture",
-        limit=1000,
-        window_seconds=3600,
+        limit=CAPTURE_LIMIT_PER_HOUR,
+        window_seconds=RATE_LIMIT_WINDOW_SECONDS_1H,
         metrics=get_metrics(),
     )
 
+    # Fast-path: reject if the sender declared an oversized body via
+    # Content-Length, before we read a single byte. Saves the round-trip
+    # of streaming N MB just to reject it. The streaming reader below
+    # catches the chunked / no-Content-Length case where this header is
+    # absent or honest only by accident.
     content_length = request.headers.get("content-length")
     if content_length and int(content_length) > settings.max_body_bytes:
         raise HTTPException(status_code=413, detail="payload too large")
 
-    body = await request.body()
-    if len(body) > settings.max_body_bytes:
-        raise HTTPException(status_code=413, detail="payload too large")
+    body = await _read_body_with_cap(request, max_bytes=settings.max_body_bytes)
 
     try:
-        _captured, endpoint = await use_case.execute(
+        result = await use_case.execute(
             token=token,
             method=request.method,
             path=f"/h/{token}{rest}",
@@ -107,6 +157,23 @@ async def capture(
     except EndpointNotFoundError as e:
         raise HTTPException(status_code=404, detail="endpoint not found") from e
 
+    endpoint = result.endpoint
+
+    # Post-commit enqueue: FastAPI runs BackgroundTasks AFTER the response is
+    # sent, which is AFTER the get_session dependency commits. That ordering
+    # guarantees the worker's find_by_id() on the forward row sees a
+    # committed row, eliminating the previous race where a fast worker
+    # observed pending status before the INSERT was visible and silently
+    # dropped the job. Enqueue is best-effort: if Redis is down, the row
+    # remains pending and the manual redrive endpoint picks it up.
+    if result.pending_forward_id is not None:
+        background_tasks.add_task(
+            _safe_enqueue,
+            forward_queue,
+            get_metrics(),
+            result.pending_forward_id,
+        )
+
     if endpoint.response_delay_ms > 0:
         await asyncio.sleep(endpoint.response_delay_ms / 1000)
 
@@ -115,3 +182,24 @@ async def capture(
         status_code=endpoint.response_status_code,
         headers=endpoint.response_headers or None,
     )
+
+
+async def _safe_enqueue(
+    forward_queue: ForwardQueue,
+    metrics: MetricsCollector,
+    forward_id: uuid.UUID,
+) -> None:
+    """Best-effort enqueue used by capture/retry background tasks.
+
+    Redis flap must not surface as a 500 on the capture response (the row
+    is already persisted; manual redrive will recover it). Wrap in a broad
+    try/except, log AND increment forward_enqueue_failed so operators see
+    the failure rate (otherwise silent failures hide a real outage).
+    """
+    try:
+        await forward_queue.enqueue(forward_id)
+    except Exception:
+        metrics.forward_enqueue_failed()
+        logger.exception(
+            "forward_enqueue_failed_post_commit", extra={"forward_id": str(forward_id)}
+        )

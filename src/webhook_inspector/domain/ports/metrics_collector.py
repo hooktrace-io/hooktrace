@@ -5,7 +5,8 @@ from abc import ABC, abstractmethod
 
 class MetricsCollector(ABC):
     @abstractmethod
-    def endpoint_created(self) -> None: ...
+    def endpoint_created(self) -> None:
+        """Increment endpoints_created_total — one event per successful CreateEndpoint."""
 
     @abstractmethod
     def request_captured(
@@ -15,10 +16,17 @@ class MetricsCollector(ABC):
         body_offloaded: bool,
         body_size: int,
         duration_seconds: float,
-    ) -> None: ...
+    ) -> None:
+        """Increment requests_captured_total{method, body_offloaded}
+        + record body_size + duration_seconds histograms.
+        Labels are strict cardinality — no user-controlled values.
+        """
 
     @abstractmethod
-    def cleaner_run(self, deleted: int) -> None: ...
+    def cleaner_run(self, deleted: int) -> None:
+        """Increment cleaner_runs_completed_total (heartbeat for absence alerts)
+        + cleaner_deletions_total counter (only if deleted > 0).
+        """
 
     @abstractmethod
     def replay_attempt(self, *, status: str) -> None:

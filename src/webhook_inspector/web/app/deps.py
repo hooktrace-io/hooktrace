@@ -28,7 +28,7 @@ from webhook_inspector.config import Settings
 from webhook_inspector.domain.ports.forward_queue import ForwardQueue
 from webhook_inspector.domain.ports.metrics_collector import MetricsCollector
 from webhook_inspector.infrastructure.database.session import make_engine
-from webhook_inspector.infrastructure.http.safe_replay_target import SafeReplayTarget
+from webhook_inspector.infrastructure.http.safe_replay_target import make_safe_replay_target
 from webhook_inspector.infrastructure.notifications.postgres_notifier import PostgresNotifier
 from webhook_inspector.infrastructure.queue.null_forward_queue import NullForwardQueue
 from webhook_inspector.infrastructure.repositories.endpoint_repository import (
@@ -144,19 +144,37 @@ async def get_list_integrations(
     )
 
 
-async def get_replay_request(
-    session: AsyncSession = Depends(get_session),  # noqa: B008
+def get_replay_request(
     settings: Settings = Depends(get_settings),  # noqa: B008
 ) -> ReplayRequest:
+    """Build the ReplayRequest use case.
+
+    No longer takes the request-scoped session dependency: ReplayRequest
+    manages its own session lifecycle (one per phase — auth/load and
+    record_outcome) to release the DB connection during HTTP. The
+    ``unit_of_work`` factory opens a fresh session per call.
+    """
+    factory = _session_factory()
+
+    from contextlib import asynccontextmanager
+
+    @asynccontextmanager
+    async def _uow():  # type: ignore[no-untyped-def]
+        async with factory() as s:
+            try:
+                yield (
+                    PostgresEndpointRepository(s),
+                    PostgresRequestRepository(s),
+                    PostgresReplayRepository(s),
+                )
+                await s.commit()
+            except Exception:
+                await s.rollback()
+                raise
+
     return ReplayRequest(
-        endpoint_repo=PostgresEndpointRepository(session),
-        request_repo=PostgresRequestRepository(session),
-        replay_repo=PostgresReplayRepository(session),
-        target=SafeReplayTarget(
-            blocked_host_suffixes=("hooktrace.io",),
-            timeout_seconds=10.0,
-            max_response_bytes=256 * 1024,
-        ),
+        unit_of_work=_uow,
+        target=make_safe_replay_target(),
         blob_storage=make_blob_storage(settings),
         metrics=get_metrics(),
     )
@@ -192,10 +210,12 @@ async def get_forward_stats_use_case(
 async def get_retry_forward(
     session: AsyncSession = Depends(get_session),  # noqa: B008
 ) -> RetryForward:
+    # ForwardQueue is intentionally NOT injected — the use case only
+    # transitions DB state; the route owns the post-commit enqueue via
+    # FastAPI BackgroundTasks. See application/use_cases/retry_forward.py.
     return RetryForward(
         endpoint_repo=PostgresEndpointRepository(session),
         forward_repo=PostgresForwardRepository(session),
-        forward_queue=get_forward_queue(),
     )
 
 

@@ -1,10 +1,11 @@
 """Manually retry a forward from the DLQ UI.
 
 Atomically transitions status to 'pending' via the repo (which also resets
-the attempt budget for previously-dead/abandoned rows), then re-enqueues
-on the forward queue so a worker actually picks it up — flipping the
-status without enqueueing leaves the row stuck (arq does not poll
-Postgres).
+the attempt budget for previously-dead/abandoned rows). The route owns
+the actual queue enqueue post-commit via FastAPI BackgroundTasks — see
+``web/app/routes.py::retry_forward_route``. Flipping status without
+enqueueing leaves the row stuck (arq does not poll Postgres) ; the route
+makes sure both happen, in the right order.
 """
 
 from dataclasses import dataclass
@@ -14,7 +15,6 @@ from uuid import UUID
 from webhook_inspector.domain.entities.forward import Forward
 from webhook_inspector.domain.exceptions import EndpointNotFoundError
 from webhook_inspector.domain.ports.endpoint_repository import EndpointRepository
-from webhook_inspector.domain.ports.forward_queue import ForwardQueue
 from webhook_inspector.domain.ports.forward_repository import ForwardRepository
 
 __all__ = ["ForwardNotRetryableError", "RetryForward"]
@@ -28,7 +28,8 @@ class ForwardNotRetryableError(Exception):
 class RetryForward:
     endpoint_repo: EndpointRepository
     forward_repo: ForwardRepository
-    forward_queue: ForwardQueue
+    # forward_queue dropped — see module docstring. The route enqueues post-
+    # commit via FastAPI BackgroundTasks to avoid losing the worker race.
 
     async def execute(self, *, token: str, forward_id: UUID) -> Forward:
         endpoint = await self.endpoint_repo.find_by_token(token)
@@ -42,8 +43,4 @@ class RetryForward:
             raise ForwardNotRetryableError(
                 f"forward {forward_id} not retryable under endpoint {token}"
             )
-
-        # Critical: actually re-enqueue. Flipping status to 'pending' without
-        # enqueueing leaves the row stuck (arq doesn't poll Postgres).
-        await self.forward_queue.enqueue(forward_id, defer_seconds=0)
         return claimed
