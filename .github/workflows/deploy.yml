@@ -28,33 +28,51 @@ jobs:
       - name: Deploy worker (arq job runner + abuse_scan cron)
         run: flyctl deploy --remote-only --config infra/fly/worker.fly.toml
 
-      - name: Smoke test
+      - name: Wait for new revision healthy
         run: |
           set -e
           APP_URL="https://app.hooktrace.io"
           INGESTOR_URL="https://hook.hooktrace.io"
 
-          # Rolling restart can take 30-60s. Retry /health for up to 2.5 min
-          # before considering the deploy failed.
-          wait_for_200() {
-            local url=$1
-            local label=$2
-            local max=30
-            local attempts=0
-            until [ "$(curl -s -o /dev/null -w '%{http_code}' "$url")" = "200" ]; do
-              attempts=$((attempts + 1))
-              if [ "$attempts" -ge "$max" ]; then
-                echo "$label still not healthy after $max attempts (${url})"
+          # With auto_stop_machines=stop + min_machines_running=0, flyctl
+          # deploy updates the image but doesn't actually start a machine if
+          # none was running. The first request wakes one. We trigger the
+          # wake here, then poll Fly's internal state (faster + more accurate
+          # than re-probing through Cloudflare while the new machine is
+          # still cold-pulling the image and the edge is propagating).
+          curl -m 60 -s -o /dev/null "$APP_URL/health" &
+          curl -m 60 -s -o /dev/null "$INGESTOR_URL/health" &
+          wait
+
+          poll_healthy() {
+            local name=$1
+            local deadline=$((SECONDS + 240))
+            until flyctl status -a "$name" --json | jq -e '
+              .Machines
+              | map(select(.state == "started"
+                           and ((.checks // []) | length > 0)
+                           and all(.checks[]; .status == "passing")))
+              | length > 0
+            ' >/dev/null 2>&1; do
+              if [ "$SECONDS" -ge "$deadline" ]; then
+                echo "$name: not healthy after 4 min"
+                flyctl status -a "$name"
                 exit 1
               fi
-              echo "$label not healthy yet (attempt $attempts/$max), waiting 5s..."
-              sleep 5
+              echo "$name: waiting for started + passing checks..."
+              sleep 10
             done
-            echo "$label healthy"
+            echo "$name: healthy"
           }
 
-          wait_for_200 "${APP_URL}/health" "app /health"
-          wait_for_200 "${INGESTOR_URL}/health" "ingestor /health"
+          poll_healthy webhook-inspector-web
+          poll_healthy webhook-inspector-ingestor
+
+      - name: Smoke test
+        run: |
+          set -e
+          APP_URL="https://app.hooktrace.io"
+          INGESTOR_URL="https://hook.hooktrace.io"
 
           TOKEN=$(curl -sX POST ${APP_URL}/api/endpoints | python3 -c "import sys,json;print(json.load(sys.stdin)['token'])")
           if [ -z "$TOKEN" ]; then
