@@ -82,8 +82,19 @@ def configure_tracing(service_name: str, environment: str) -> None:
     logger.info("tracing_configured", extra={"service": service_name})
 
 
-def instrument_app(app: FastAPI, engine: AsyncEngine | None = None) -> None:
-    """Auto-instrument FastAPI + SQLAlchemy. Safe to call once at startup."""
+def instrument_fastapi(app: FastAPI) -> None:
+    """Wire OpenTelemetryMiddleware into the FastAPI app.
+
+    MUST be called at module-eval (before any ASGI call), NOT in lifespan.
+    FastAPIInstrumentor.instrument_app patches Starlette.build_middleware_stack,
+    but Starlette caches the built stack on the FIRST __call__ — which is the
+    lifespan startup dispatch itself. Calling this inside lifespan leaves the
+    cached stack without the OTEL middleware, silently dropping HTTP server
+    spans while still flipping `_is_instrumented_by_opentelemetry = True`.
+    """
     FastAPIInstrumentor.instrument_app(app)
-    if engine is not None:
-        SQLAlchemyInstrumentor().instrument(engine=engine.sync_engine)
+
+
+def instrument_sqlalchemy(engine: AsyncEngine) -> None:
+    """Auto-instrument a SQLAlchemy engine. Safe to call from lifespan."""
+    SQLAlchemyInstrumentor().instrument(engine=engine.sync_engine)

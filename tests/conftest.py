@@ -104,7 +104,7 @@ def settings(monkeypatch, database_url):
 @pytest.fixture
 async def app_client(monkeypatch, database_url, engine):
     """httpx client wired to the web FastAPI app. LifespanManager triggers
-    the app's lifespan (configure_tracing/metrics/instrument_app). Clears
+    the app's lifespan (configure_tracing/metrics/instrument_sqlalchemy). Clears
     the 5 lru_cache factories in web/app/deps.py.
 
     Note : web/app/deps.py has 5 lru_caches (get_settings, _engine,
