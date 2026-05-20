@@ -34,7 +34,11 @@ from webhook_inspector.infrastructure.database.session import make_engine
 from webhook_inspector.jobs.abuse_scan import run_abuse_scan
 from webhook_inspector.observability.logging import configure_logging
 from webhook_inspector.observability.metrics import configure_metrics, force_flush_metrics
-from webhook_inspector.observability.tracing import configure_tracing
+from webhook_inspector.observability.tracing import (
+    configure_tracing,
+    force_flush_traces,
+    instrument_sqlalchemy,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -149,6 +153,10 @@ async def startup(ctx: dict[str, object]) -> None:
     session_factory: async_sessionmaker[AsyncSession] = async_sessionmaker(
         engine, expire_on_commit=False, class_=AsyncSession
     )
+    # Auto-instrument SQLAlchemy so every DB op produces a span. Without
+    # this the worker process configures a TracerProvider but never
+    # creates any spans, and the Honeycomb dataset never appears.
+    instrument_sqlalchemy(engine)
     ctx["_engine"] = engine
     ctx["_session_factory"] = session_factory
 
@@ -192,6 +200,7 @@ async def shutdown(ctx: dict[str, object]) -> None:
     except Exception:  # noqa: BLE001
         logger.warning("worker_engine_dispose_failed", exc_info=True)
     force_flush_metrics()
+    force_flush_traces()
     logger.info("worker_shutdown")
 
 
