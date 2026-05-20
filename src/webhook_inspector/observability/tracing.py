@@ -98,3 +98,18 @@ def instrument_fastapi(app: FastAPI) -> None:
 def instrument_sqlalchemy(engine: AsyncEngine) -> None:
     """Auto-instrument a SQLAlchemy engine. Safe to call from lifespan."""
     SQLAlchemyInstrumentor().instrument(engine=engine.sync_engine)
+
+
+def force_flush_traces(timeout_millis: int = 5000) -> None:
+    """Drain the BatchSpanProcessor before a short-lived process exits.
+
+    BatchSpanProcessor batches spans and flushes them periodically (default
+    every 5s). A process that exits — auto-suspend, machine rotation, the
+    end of a one-shot job — drops whatever is still in the queue. Without
+    this call the worker can run for hours and never produce a single span
+    in Honeycomb (the dataset never appears at all). Mirrors
+    `force_flush_metrics()`.
+    """
+    provider = trace.get_tracer_provider()
+    if hasattr(provider, "force_flush"):
+        provider.force_flush(timeout_millis=timeout_millis)
