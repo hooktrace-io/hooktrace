@@ -31,15 +31,19 @@ jobs:
       - name: Wait for new revision healthy
         run: |
           set -e
-          APP_URL="https://app.hooktrace.io"
-          INGESTOR_URL="https://hook.hooktrace.io"
+          # Hit Fly directly, not the Cloudflare-fronted hooktrace.io: Bot
+          # Fight Mode 403s the GitHub runner IPs. The smoke test verifies
+          # "the Fly deploy itself works"; CDN/WAF correctness is verified
+          # out-of-band on first setup and doesn't change per-deploy.
+          APP_URL="https://webhook-inspector-web.fly.dev"
+          INGESTOR_URL="https://webhook-inspector-ingestor.fly.dev"
 
           # With auto_stop_machines=stop + min_machines_running=0, flyctl
           # deploy updates the image but doesn't actually start a machine if
           # none was running. The first request wakes one. We trigger the
           # wake here, then poll Fly's internal state (faster + more accurate
-          # than re-probing through Cloudflare while the new machine is
-          # still cold-pulling the image and the edge is propagating).
+          # than re-probing through HTTP while the new machine is still
+          # cold-pulling the image).
           curl -m 60 -s -o /dev/null "$APP_URL/health" &
           curl -m 60 -s -o /dev/null "$INGESTOR_URL/health" &
           wait
@@ -71,8 +75,10 @@ jobs:
       - name: Smoke test
         run: |
           set -e
-          APP_URL="https://app.hooktrace.io"
-          INGESTOR_URL="https://hook.hooktrace.io"
+          # See "Wait for new revision healthy" for the rationale on
+          # bypassing Cloudflare in CI.
+          APP_URL="https://webhook-inspector-web.fly.dev"
+          INGESTOR_URL="https://webhook-inspector-ingestor.fly.dev"
 
           TOKEN=$(curl -sX POST ${APP_URL}/api/endpoints | python3 -c "import sys,json;print(json.load(sys.stdin)['token'])")
           if [ -z "$TOKEN" ]; then
