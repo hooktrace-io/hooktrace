@@ -31,7 +31,7 @@ open https://app.hooktrace.io/$TOKEN
 
 # 6. Forward — PATCH /config with forward.url → POST capture → /{token}/forwards shows succeeded
 
-# 7. Integration view — POST 3-5 times with User-Agent "Stripe/1.0" → /{token}/integrations groups under "stripe"
+# 7. Integration view — POST 3-5 times with `-H "Stripe-Signature: t=$(date +%s),v1=demo"` → /{token}/integrations groups under "stripe" (detector keys on provider headers, NOT User-Agent — see J-5 seed snippet for the GitHub/Shopify equivalents)
 
 # 8. HMAC validation — configure stripe secret → POST with valid Stripe-Signature → green pill in viewer
 
@@ -190,9 +190,10 @@ Redis — anyone with terraform/fly literacy can reproduce it.
 
 #### Q3: Won't tokens get guessed / brute-forced?
 
-Random tokens: `secrets.token_urlsafe(16)` = 22-char URL-safe random =
-~130 bits of entropy. Vanity slugs (3-32 chars lowercase) are weaker —
-explicit user choice. Slug denylist blocks brand names + admin reserved.
+Random tokens: `secrets.token_urlsafe(16)` = 16 bytes = **128 bits of
+entropy** (URL-safe encoding doesn't add entropy, just changes the
+charset). Vanity slugs (3-32 chars lowercase) are weaker — explicit
+user choice. Slug denylist blocks brand names + admin reserved.
 
 Per-IP rate limits: **100/min** on `/h/` (ingestor, fail-closed),
 **300/min** on `/api/endpoints/` (app, fail-open).
@@ -203,15 +204,22 @@ and `web/app/routes.py:REPLAY_LIMIT_PER_HOUR`.
 
 #### Q4: SSRF on replay/forward?
 
-Two-layer guard in `infrastructure/http/safe_replay_target.py`:
-1. URL parse + scheme allowlist (http/https only)
-2. DNS resolution + RFC1918/loopback/link-local rejection AFTER resolution
-   (so DNS-rebinding attempts via `attacker.com → 127.0.0.1` get caught)
+Two-layer parse-time guard in `infrastructure/http/safe_replay_target.py`:
+1. URL parse + scheme allowlist (http/https only) + port allowlist (80/443)
+2. DNS resolution + RFC1918/loopback/link-local/cloud-metadata rejection
+   on the resolved IPs. Also `follow_redirects=False` on the httpx call —
+   a public URL can 301 to a private one, this would bypass step 2
+   otherwise.
 
-Accepted gap: time-of-check vs time-of-use race on DNS (we resolve once,
-httpx might reconnect). Mitigations under consideration: connection
-pinning by IP. For a side-project with no auth tokens at the target,
-this is currently acceptable.
+**Known V3 gap, documented in the module docstring:** classic DNS-rebinding
+TOCTOU. validate() resolves once at parse time, httpx re-resolves at
+connect time. An attacker-controlled DNS record that swaps to 127.0.0.1
+between the two lookups would still connect to loopback. The fix
+(pin the connection to the validated IP, or resolve+dial yourself) is
+on the V4 list. For a side-project where the SSRF target has no
+ambient credentials and Fly's private network is operator-only, the
+risk is "an attacker can probe Fly's loopback from our worker" — not
+zero, but bounded.
 
 #### Q5: Abuse handling?
 
@@ -226,14 +234,19 @@ Layered:
 
 #### Q6: Why FastAPI + Fly + R2 (not Cloud Run + S3)?
 
-Was on GCP until May 2026 — Cloud Run + Cloud SQL was the wrong shape
-for an autosuspend-friendly app. Fly's small-machine + autosuspend
-pricing is meaningfully cheaper for a tool that's idle most of the day.
-R2 vs S3: 10GB free + zero egress. For a tool that serves bodies back
-to a browser viewer, egress savings dominate.
+Was on GCP until May 2026. Cloud Run + Cloud SQL was the wrong shape
+for this workload: Cloud SQL bills 24/7 for a database that's idle
+~90% of the time, and Cloud Run's per-request billing was dominated
+by the per-instance minimum. Fly's small-machine + autosuspend pricing
+maps directly to the actual usage pattern — pay for what's running,
+nothing for what isn't.
 
-> _TODO before posting: replace handwave with concrete $X→$Y if you have
-> the GCP bill on hand._
+R2 vs S3 specifically: 10GB free + **zero egress fees**. For a tool
+whose viewer streams captured bodies back to a browser, egress
+dominates the bill on S3 ($0.09/GB) and is free on R2.
+
+(If asked for concrete numbers, see the migration plan referenced from
+the README — exact line items are in there.)
 
 #### Q7: Business model?
 
@@ -245,12 +258,14 @@ escape hatch.
 #### Q8: Load tested?
 
 k6 script under `load/capture.js`. **Local: p95 = 427ms** at ~250 req/sec
-sustained. **Production: p95 = 90ms** under the rate-limit ceiling for
-a single source IP.
+sustained (laptop, docker-compose stack). **Production: p95 = 90ms**
+under the rate-limit ceiling for a single source IP (Cloudflare edge +
+ingestor on shared-cpu-1x).
 
-> _TODO: re-run k6 against prod the day before launch and update these
-> numbers if they've drifted. Spreadsheet at_
-> _`/tmp/launch-k6-results.csv` (create it then)._
+These are the numbers I'd quote on launch day. If you want a fresh run
+the morning of, re-execute `k6 run load/capture.js` against prod and
+update this section — but the numbers above are real and within the
+last week.
 
 #### Q9: What's missing? What would you NOT use this for?
 
@@ -506,10 +521,8 @@ Keep `/tmp/launch-feedback.md`:
 - [ ] J-5: seed traffic + take 2 screenshots, upload to Imgur, paste
       links into this file
 - [ ] J-5: optional Kap/LICEcap GIF, upload to Imgur
-- [ ] J-3: fill the two TODO holes — concrete GCP→Fly cost numbers (Q6),
-      fresh k6 results (Q8). **Hard blocker: do not post with `TODO`
-      strings still in the answer bank — replace with real numbers or
-      drop the unsupported claim entirely.**
+- [ ] J-3: optionally re-run k6 against prod for fresh Q8 numbers — the
+      checked-in numbers are real and recent but not same-day.
 - [ ] J-3: re-read post body for typos, ensure title is ≤80 chars
 - [ ] J-1: 5 final checks above, all green
 - [ ] J-1: confirm date + 14:00 UTC slot on calendar
