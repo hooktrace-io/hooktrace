@@ -7,7 +7,7 @@
 [![Code style: ruff](https://img.shields.io/badge/code%20style-ruff-000000.svg)](https://github.com/astral-sh/ruff)
 [![Type checked: mypy](https://img.shields.io/badge/types-mypy_strict-blue.svg)](https://mypy.readthedocs.io/)
 
-**The free observability layer for webhooks.** Capture, validate HMAC signatures (Stripe, GitHub, Shopify, Twilio, Mailgun, Discord, Slack, Zapier, n8n), replay to localhost, forward with retry + DLQ — all from one anonymous URL. No signup, endpoints expire 30 days after creation.
+**The free observability layer for webhooks.** Capture, validate HMAC signatures (Stripe, GitHub, Shopify, Twilio, Mailgun, Discord, Slack, Zapier, n8n), replay to your dev server via an ngrok / Cloudflare Tunnel, forward with retry + DLQ — all from one anonymous URL. No signup, endpoints expire 30 days after creation.
 
 > **AI-assisted development.** Parts of this codebase were drafted with Claude (Anthropic) acting as a pair programmer. All design decisions, architectural reviews, debugging, and verification are mine.
 
@@ -195,7 +195,7 @@ The secret is encrypted at rest with the `SECRETS_ENCRYPTION_KEY`. The check res
 
 ## Replay
 
-Click any captured request in the viewer to POST it to your `localhost:3000`, a staging backend, or any URL. SSRF-guarded: private IP ranges, link-local, and cloud metadata endpoints (`169.254.169.254`, `100.64.0.0/10`, `fd00::/8`, …) are blocked.
+Click any captured request in the viewer to POST it to a public URL — a staging backend, or an `ngrok` / Cloudflare Tunnel pointing at your local dev server. The SSRF guard rejects loopback, RFC1918 private ranges, link-local, and cloud metadata endpoints (`169.254.169.254`, `100.64.0.0/10`, `fd00::/8`, …), so the target must resolve to a public address — replay directly at `http://localhost:3000` will be refused, by design.
 
 ```bash
 curl -X POST "https://app.hooktrace.io/api/endpoints/$TOKEN/requests/$REQUEST_ID/replay" \

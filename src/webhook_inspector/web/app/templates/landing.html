@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>hooktrace — Free observability layer for webhooks</title>
-  <meta name="description" content="Capture, validate HMAC signatures (Stripe, GitHub, Shopify, …), replay to localhost, forward with retry &amp; DLQ. Free, no signup, anonymous URLs. Open source.">
+  <meta name="description" content="Capture, validate HMAC signatures (Stripe, GitHub, Shopify, …), replay through an ngrok / Cloudflare Tunnel to your local dev, forward with retry &amp; DLQ. Free, no signup, anonymous URLs. Open source.">
 
   <!-- Open Graph / social sharing -->
   <meta property="og:title" content="hooktrace — Free observability layer for webhooks">
@@ -42,7 +42,7 @@
       </p>
       <p class="text-slate-400 text-base leading-relaxed">
         Capture, validate signatures, replay, forward with retry — all from one anonymous URL.
-        No signup. From localhost to production.
+        No signup. From your dev tunnel to production.
       </p>
       <p class="text-slate-500 text-sm mt-4">
         Free. No signup. Endpoints and all their data (captured requests, forwards, replays) are deleted 30 days after creation.
@@ -170,13 +170,16 @@ github    13 requests   0 signature errors   p95  ~80ms</code></pre>
         </div>
 
         <div class="bg-slate-800 rounded p-4">
-          <h3 class="text-emerald-400 font-bold mb-1">Replay to localhost</h3>
+          <h3 class="text-emerald-400 font-bold mb-1">Replay to your dev or staging</h3>
           <p class="text-slate-300 text-sm mb-2">
-            Click any captured request, point it at your <code>localhost:3000</code>
-            (or any URL), reproduce a bug in 5 seconds. SSRF-guarded — private ranges
-            blocked unless explicitly allowed.
+            Click any captured request, point it at a public URL — your
+            staging backend, or an <code>ngrok</code> /
+            <code>Cloudflare Tunnel</code> exposing your local server —
+            and reproduce a bug in 5 seconds. SSRF-guarded: loopback,
+            RFC1918, link-local and cloud-metadata IPs are rejected,
+            so the target must resolve to a public address.
           </p>
-          <pre class="text-slate-400 text-xs bg-slate-900 rounded px-2 py-1 overflow-x-auto"><code>replay req_7f3c → POST http://localhost:3000/webhooks/stripe
+          <pre class="text-slate-400 text-xs bg-slate-900 rounded px-2 py-1 overflow-x-auto"><code>replay req_7f3c → POST https://abc123.ngrok-free.app/webhooks/stripe
                   200 OK   42ms</code></pre>
         </div>
 
@@ -200,7 +203,7 @@ github    13 requests   0 signature errors   p95  ~80ms</code></pre>
       <h2 class="text-slate-400 text-sm uppercase tracking-wider mb-4">Use cases</h2>
       <ul class="space-y-2 text-slate-300 text-sm">
         <li>&middot; Debug Stripe / GitHub / Shopify webhooks — instantly see if the HMAC signature matches your secret</li>
-        <li>&middot; Reproduce a webhook bug locally — replay a captured request to your <code>localhost:3000</code></li>
+        <li>&middot; Reproduce a webhook bug locally — replay a captured request to your dev server via <code>ngrok</code> or Cloudflare Tunnel</li>
         <li>&middot; Bridge a dev webhook source to a staging backend with retry + DLQ</li>
         <li>&middot; Share a URL with a teammate to see incoming traffic in real-time</li>
       </ul>
