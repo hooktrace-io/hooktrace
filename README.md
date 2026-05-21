@@ -301,7 +301,7 @@ Response format:
 | V6 | 🟡 Planned | Formal SLOs + error budgets + status page publique + first real postmortem |
 | V7+ | 🟡 Future | WebSocket inspection (new protocol dimension) + SMTP/email capture (new service infra) — explored as desire dictates |
 
-V3 dropped two items vs. the original plan: schema-drift detection (F4) and an OTEL timeline UI (F7) — both removed for low actionable value. The JSONata transforms feature (F6) is deferred to V4. See [`docs/specs/`](docs/specs/) for design rationale.
+V3 dropped two items vs. the original plan: schema-drift detection (F4) and an OTEL timeline UI (F7) — both removed for low actionable value. The JSONata transforms feature (F6) is deferred to V4.
 
 ## Contributing
 
