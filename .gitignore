@@ -28,3 +28,9 @@ infra/terraform*/*.tfstate
 infra/terraform*/*.tfstate.backup
 infra/terraform*/crash.log
 infra/terraform*/*.out
+
+# Internal planning, launch notes, spec drafts — local-only, never tracked.
+# Anchored to repo root so it does NOT shadow `src/webhook_inspector/docs/`
+# (the integration docs which ARE part of the package + served at
+# /docs/integrations).
+/docs/
