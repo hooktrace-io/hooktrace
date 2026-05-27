@@ -1,4 +1,4 @@
-FROM python:3.13-slim AS builder
+FROM python:3.14-slim AS builder
 
 ENV PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1
 # `apt-get upgrade` pulls Debian security patches that python:3.13-slim
@@ -20,7 +20,7 @@ COPY src ./src
 RUN uv sync --frozen --no-dev
 
 
-FROM python:3.13-slim AS runtime
+FROM python:3.14-slim AS runtime
 
 ENV PYTHONUNBUFFERED=1 PATH="/app/.venv/bin:$PATH"
 # Match the builder's `apt-get upgrade` so the runtime image has Debian
